@@ -107,11 +107,10 @@ function _decodeEntities(s) {
 }
 
 // Waits until `ms` (at least 3.6 s) have passed since `since`, so links opened together share one wait.
-// NuvioTV's QuickJS has no timers, so there the wait has to block; Nuvio Mobile gets a real timer.
+// Blocking like the original: timer support differs between Nuvio runtimes and versions.
 function _sleep(ms, since) {
   var until = (since || Date.now()) + Math.max(ms || 1000, 3600);
   return new Promise(function (resolve) {
-    if (typeof setTimeout === 'function') return setTimeout(resolve, Math.max(0, until - Date.now()));
     while (Date.now() < until) {}
     resolve();
   });
