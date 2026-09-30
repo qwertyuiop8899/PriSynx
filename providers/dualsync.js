@@ -29,10 +29,10 @@ var SYNC_OK_SECONDS = 0.1;
 // A speed mismatch below this drifts less than the sync band over a 2-hour film.
 var SYNC_RATE_TOLERANCE = SYNC_OK_SECONDS / 7200;
 // NuvioTV (>=1.1.0-beta.3) clamps the manual audio delay to ±60000 ms in 25 ms steps.
-var NUVIO_MAX_DELAY_MS = 60000;
 var NUVIO_DELAY_STEP_MS = 25;
-// Largest offset to hand to the proposed NuvioTV auto-sync; beyond it every seek costs too much buffering.
-var AUTO_DELAY_MAX_MS = 15000;
+// Largest offset to hand to NuvioTV auto-sync (±60 s).
+var AUTO_DELAY_MAX_MS = 60000;
+var NUVIO_MAX_DELAY_MS = AUTO_DELAY_MAX_MS;
 // Frame-rate pairs behind typical release speed changes (NTSC 1000/1001, PAL 25).
 var FPS_PAIRS = [[23.976, 24], [24, 25], [23.976, 25]];
 // One encode always has the same playlist length; separate encodes of a release differ by 0.5 s or more.
@@ -538,7 +538,7 @@ function classifySync(d) {
   var offset = Number(d.offset || 0);
   if (Math.abs(offset) <= SYNC_OK_SECONDS) return { level: "green", tag: "in sync" };
   var delayMs = nuvioDelayMs(offset);
-  if (Math.abs(delayMs) > NUVIO_MAX_DELAY_MS) return { level: "red", reason: "offset oltre il limite di Nuvio \u00B160 s", tag: formatDelay(delayMs) };
+  if (Math.abs(delayMs) > NUVIO_MAX_DELAY_MS) return { level: "red", reason: "offset oltre " + (AUTO_DELAY_MAX_MS / 1000) + " s", tag: formatDelay(delayMs) };
   return { level: "yellow", delayMs: delayMs, tag: formatDelay(delayMs) };
 }
 
@@ -598,11 +598,11 @@ function autoDelayMs(info) {
 }
 
 function syncBadge(sync) {
-  var icon = { green: "\uD83D\uDD0A\u2705", yellow: "\u26A0\uFE0F", red: "\u26D4" }[sync.level] || "\u2754";
+  var icon = { green: "\uD83D\uDD0A\u2705", yellow: "\u23F1\uFE0F", red: "\u26D4" }[sync.level] || "\u2754";
   var short = icon + " " + sync.tag;
   if (sync.level === "green") return { short: short, line: icon + " Audio in sync" };
   if (sync.level === "yellow" && sync.delayMs !== undefined) {
-    return { short: short, line: icon + " Attenzione: audio da impostare a " + formatDelay(sync.delayMs) + " (poi rimetti 0)" };
+    return { short: short, line: icon + " Ritardo audio " + formatDelay(sync.delayMs) + " applicato in automatico (NuvioTV); altrimenti impostalo a mano" };
   }
   if (sync.level === "yellow") return { short: short, line: icon + " Offset non misurato, da provare (" + sync.reason + ")" };
   if (sync.level === "red") return { short: short, line: icon + " Audio non in sync, non riproducibile (" + sync.reason + ")" };
@@ -692,9 +692,9 @@ function getStreams(tmdbId, mediaType, season, episode) {
           type: "hls",
           provider: "dualsync",
           headers: enc.headers,
-          // Not read by Nuvio yet. audioSync is informational; audioDelayMs (>0 = delay audio) is the proposed auto-sync field.
           audioSync: ita ? sync.info : undefined,
-          audioDelayMs: ita ? autoDelayMs(sync.info) : undefined,
+          // NuvioTV adds it to the device audio delay (>0 = audio later); other apps ignore it.
+          behaviorHints: ita && autoDelayMs(sync.info) !== undefined ? { audioDelayMs: autoDelayMs(sync.info) } : undefined,
           // 4K before FHD, then best verdict, then a measured offset before an estimate.
           _rank: -Number(qkey) * 1000 + (ita ? LEVEL_RANK[sync.level] * 10 + (sync.measured ? 0 : 5) : 0)
         });
