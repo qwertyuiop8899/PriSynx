@@ -1,5 +1,6 @@
 // Test-only scraper: fixed streams with behaviorHints.audioDelayMs, to check the NuvioTV stream-audio-delay build.
-var BIPBOP = "https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_16x9/bipbop_16x9_variant.m3u8";
+// Offsets are seconds, not fractions: only then is "audio late" vs "audio early" obvious by eye and ear.
+var TEARS = "https://demo.unified-streaming.com/k8s/features/stable/video/tears-of-steel/tears-of-steel.ism/.m3u8";
 var BUNNY = "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8";
 
 function testStream(label, url, delayMs) {
@@ -18,10 +19,12 @@ function testStream(label, url, delayMs) {
 
 function getStreams(tmdbId, mediaType, season, episode) {
   return Promise.resolve([
-    testStream("bipbop +500 ms", BIPBOP, 500),
-    testStream("bipbop -500 ms", BIPBOP, -500),
+    testStream("Tears of Steel 0 (controllo)", TEARS, null),
+    testStream("Tears of Steel +2 s", TEARS, 2000),
+    testStream("Tears of Steel -2 s", TEARS, -2000),
+    testStream("Big Buck Bunny 0 (controllo)", BUNNY, null),
     testStream("Big Buck Bunny +5 s", BUNNY, 5000),
-    testStream("Big Buck Bunny 0 (controllo)", BUNNY, null)
+    testStream("Big Buck Bunny -5 s", BUNNY, -5000)
   ]);
 }
 
