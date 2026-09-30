@@ -1872,8 +1872,6 @@ function extractLinksFromPage(domain, pageUrl, seasonNum, episodeNum, cb) {
             resolved = true;
             if (streams.length === 0) return cb(null);
             probeStreamsResolution(streams, function (finalStreams) {
-              // Shown under the first link in Nuvio, so missing links can be diagnosed on the device.
-              if (failures.length && finalStreams.length) finalStreams[0].size = '\u26A0\uFE0F Non trovati: ' + failures.join(' \u00B7 ');
               cb(finalStreams.length > 0 ? finalStreams : null);
             });
           }
