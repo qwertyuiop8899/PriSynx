@@ -87,7 +87,7 @@ function getStreams(id, type, season, episode) {
       function doSearch(title, year) {
         searchCB01(title, year, mediaType, season, episode, function (pageUrl) {
           if (!pageUrl) return resolve([]);
-          extractFromPage(pageUrl, season, episode, function (streams) {
+          extractFromPage(pageUrl, season, episode, title, function (streams) {
             resolve(streams || []);
           });
         });
@@ -479,7 +479,29 @@ function extractTables(html) {
   return sections;
 }
 
-function extractFromPage(pageUrl, season, episode, cb) {
+// Nuvio Mobile shows name + quality + size, NuvioTV name + size: the details go in size, one per line.
+function formatCbStream(s, title, season, episode, isSub) {
+  var lines = [];
+  if (season && episode) lines.push('\uD83D\uDCFA Stagione ' + Number(season) + ' \u00B7 Episodio ' + Number(episode));
+  lines.push(isSub ? '\uD83C\uDF0D Originale + \uD83D\uDCAC Sub ITA' : '\uD83C\uDDEE\uD83C\uDDF9 Italiano');
+  lines.push('\uD83D\uDDA5\uFE0F ' + (s.quality || '720p'));
+  lines.push('\u25B6\uFE0F MixDrop');
+  s.name = '\uD83C\uDF7F CB01 - ' + (title || 'CB01');
+  s.size = lines.join('\n');
+  s.title = s.name + '\n' + s.size;
+}
+
+// SUB when the page title says so, or when the season only has a SUB section ("STAGIONE 1 - SUB - HD").
+function isSubPage(html, season) {
+  var head = (html.match(/<title[^>]*>([\s\S]*?)<\/title>/i) || [])[1] || '';
+  var h1 = (html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i) || [])[1] || '';
+  if (/sub[\s\-]*ita/i.test(head + ' ' + h1)) return true;
+  if (!season) return false;
+  var upper = html.toUpperCase();
+  return upper.indexOf('STAGIONE ' + season + ' - SUB') >= 0 && upper.indexOf('STAGIONE ' + season + ' - ITA') < 0;
+}
+
+function extractFromPage(pageUrl, season, episode, title, cb) {
   cb01Fetch(pageUrl, function (err, html) {
     if (err || !html) return cb([]);
 
@@ -531,6 +553,8 @@ function extractFromPage(pageUrl, season, episode, cb) {
         if (pending === 0) {
           if (results.length === 0) return cb([]);
           probeStreamsResolution(results, function (finalStreams) {
+            var isSub = isSubPage(html, isSeries ? season : 0);
+            finalStreams.forEach(function (s) { formatCbStream(s, title, isSeries ? season : 0, isSeries ? episode : 0, isSub); });
             cb(finalStreams.length > 0 ? finalStreams : []);
           });
         }
@@ -641,12 +665,6 @@ function probeStreamsResolution(streams, cb) {
             s.quality = "720p";
           } else {
             s.quality = "480p";
-          }
-          if (s.title) {
-            s.title = s.title.replace(/\s+(?:1080p|720p|480p|HD)\b/gi, "").trim() + " " + s.quality;
-          }
-          if (s.name) {
-            s.name = s.name.replace(/\s+(?:1080p|720p|480p|HD)\b/gi, "").trim() + " " + s.quality;
           }
         }
       })
