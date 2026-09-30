@@ -27,8 +27,8 @@ var TOASTFLIX_URL = "https://toastflix.stremio-italia.eu";
 var SYNC_OK_SECONDS = 0.1;
 // A speed mismatch below this drifts less than the sync band over a 2-hour film.
 var SYNC_RATE_TOLERANCE = SYNC_OK_SECONDS / 7200;
-// NuvioTV clamps the manual audio delay to ±3000 ms in 25 ms steps.
-var NUVIO_MAX_DELAY_MS = 3000;
+// NuvioTV (>=1.1.0-beta.3) clamps the manual audio delay to ±60000 ms in 25 ms steps.
+var NUVIO_MAX_DELAY_MS = 60000;
 var NUVIO_DELAY_STEP_MS = 25;
 // Largest offset to hand to the proposed NuvioTV auto-sync; beyond it every seek costs too much buffering.
 var AUTO_DELAY_MAX_MS = 15000;
@@ -524,7 +524,7 @@ function classifySync(d) {
   var offset = Number(d.offset || 0);
   if (Math.abs(offset) <= SYNC_OK_SECONDS) return { level: "green", tag: "in sync" };
   var delayMs = nuvioDelayMs(offset);
-  if (Math.abs(delayMs) > NUVIO_MAX_DELAY_MS) return { level: "red", reason: "offset oltre il limite di Nuvio \u00B13 s", tag: formatDelay(delayMs) };
+  if (Math.abs(delayMs) > NUVIO_MAX_DELAY_MS) return { level: "red", reason: "offset oltre il limite di Nuvio \u00B160 s", tag: formatDelay(delayMs) };
   return { level: "yellow", delayMs: delayMs, tag: formatDelay(delayMs) };
 }
 

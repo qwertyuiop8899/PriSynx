@@ -1,6 +1,6 @@
 {
   "name": "PriSynx",
-  "version": "1.4.4",
+  "version": "1.4.5",
   "description": "Video da fonti internazionali con sync audio italiano",
   "author": "local",
   "scrapers": [
@@ -8,7 +8,7 @@
       "id": "movyita",
       "name": "MovyITA",
       "description": "Video Movy con sync audio italiano, audio originale come seconda traccia",
-      "version": "1.2.6",
+      "version": "1.2.7",
       "author": "local",
       "resources": ["stream"],
       "idPrefixes": ["tmdb:", "tt"],
@@ -24,7 +24,7 @@
       "id": "dualsync",
       "name": "DualSync",
       "description": "Video 4K/FHD (Cinejoy, Vidfast) + audio ITA, offset ToastFlix",
-      "version": "1.0.2",
+      "version": "1.0.3",
       "author": "local",
       "resources": ["stream"],
       "idPrefixes": ["tmdb:", "tt"],
