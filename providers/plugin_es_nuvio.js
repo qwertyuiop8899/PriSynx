@@ -847,17 +847,18 @@ function unpackPackedJs(packed) {
 // =========================================================================
 // CLICKA.CC CAPTCHA SOLVER
 // =========================================================================
+// Throws instead of rejecting: see the quickjs-kt note in resolveClickacc.
 function _solveCaptchaPage(text, currentUrl, jar) {
+  if (!_hasCaptcha(text)) return Promise.resolve({ text: text, url: currentUrl });
+  var imageSrc = _captchaImageSrc(text);
+  if (!imageSrc) throw new Error('captcha image not found');
+  // Extract base64 data from data URI
+  var b64 = imageSrc.replace(/^data:image\/(?:png|jpe?g);base64,/, '');
+  var guess = _ocrSolve(b64);
+  if (!guess || guess.length < 3 || guess.length > 6) {
+    throw new Error('OCR failed to solve captcha');
+  }
   return new Promise(function (resolve, reject) {
-    if (!_hasCaptcha(text)) return resolve({ text: text, url: currentUrl });
-    var imageSrc = _captchaImageSrc(text);
-    if (!imageSrc) return reject(new Error('captcha image not found'));
-    // Extract base64 data from data URI
-    var b64 = imageSrc.replace(/^data:image\/(?:png|jpe?g);base64,/, '');
-    var guess = _ocrSolve(b64);
-    if (!guess || guess.length < 3 || guess.length > 6) {
-      return reject(new Error('OCR failed to solve captcha'));
-    }
     var action = _findCaptchaFormAction(text, currentUrl);
     var formData = _formDataFromInputs(text, guess);
     _clickaPost(action, formData, currentUrl, jar)
@@ -949,7 +950,7 @@ function tryMixDropHosts(id, linkHost) {
   var lastErr = null;
   function next() {
     if (idx >= hosts.length) {
-      return Promise.reject(new Error('MixDrop all hosts failed: ' + (lastErr || 'unknown')));
+      throw new Error('MixDrop all hosts failed: ' + (lastErr || 'unknown'));
     }
     var host = hosts[idx++];
     return fetchMixDrop(host, id).then(function (streamUrl) {
@@ -1217,8 +1218,10 @@ function resolveClickacc(startUrl, kind, jar) {
   var ES_DOMAIN = 'https://eurostreamings.live';
   var referer = ES_DOMAIN + '/';
   var activeJar = jar || {};
+  // Nuvio Mobile <= 0.5.3 (quickjs-kt 1.0.5) cancels every pending fetch as soon as a promise is
+  // rejected with no handler yet, e.g. Promise.reject(): so failures are thrown inside callbacks.
   function loop(hop) {
-    if (hop >= 6) return Promise.reject(new Error('Clickacc: max hops reached'));
+    if (hop >= 6) throw new Error('Clickacc: max hops reached');
     // Check if current is a redirector URL (clicka.cc/adelta|tva|amix)
     var isRedirector = false;
     try {
@@ -1228,7 +1231,7 @@ function resolveClickacc(startUrl, kind, jar) {
     } catch (e) { }
     if (isRedirector) {
       return _followRedirector(current, referer, activeJar).then(function (upUrl) {
-        if (upUrl === current) return Promise.reject(new Error('Clickacc: redirector did not resolve'));
+        if (upUrl === current) throw new Error('Clickacc: redirector did not resolve');
         referer = current;
         current = upUrl;
         return loop(hop + 1);
@@ -1248,7 +1251,7 @@ function resolveClickacc(startUrl, kind, jar) {
             headers: { "User-Agent": ES_UA, "Referer": "https://" + res.host + "/" }
           };
         }).catch(function (err) {
-          return Promise.reject(err && err.fileGone ? err : new Error('MixDrop extraction failed'));
+          throw (err && err.fileGone ? err : new Error('MixDrop extraction failed'));
         });
       }
     }
@@ -1310,7 +1313,7 @@ function resolveClickacc(startUrl, kind, jar) {
           if (m3u8Url) return { url: m3u8Url, name: 'Eurostreaming - Stream (Clicka)', title: 'Stream (Clicka)', behaviorHints: { notWebReady: true } };
           // Next continue URL
           var nextUrl = _findNextUprotUrl(text, finalUrl);
-          if (!nextUrl || nextUrl === current) return Promise.reject(new Error('Clickacc: no next URL after captcha'));
+          if (!nextUrl || nextUrl === current) throw new Error('Clickacc: no next URL after captcha');
           referer = finalUrl;
           current = nextUrl;
           return loop(hop + 1);
@@ -1342,7 +1345,7 @@ function resolveClickacc(startUrl, kind, jar) {
       if (m3u8Url2) return { url: m3u8Url2, name: 'Eurostreaming - Stream (Clicka)', title: 'Stream (Clicka)', behaviorHints: { notWebReady: true } };
       // Next continue URL
       var nextUrl2 = _findNextUprotUrl(text, finalUrl);
-      if (!nextUrl2 || nextUrl2 === current) return Promise.reject(new Error('Clickacc: dead end'));
+      if (!nextUrl2 || nextUrl2 === current) throw new Error('Clickacc: dead end');
       referer = finalUrl;
       current = nextUrl2;
       return loop(hop + 1);
