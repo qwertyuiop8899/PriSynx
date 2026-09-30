@@ -1382,12 +1382,12 @@ function _runNuvioTest(resolve) {
   getEsDomain(function (domain) {
     if (!domain) domain = 'https://eurostreamings.live';
     var testPage = domain + '/the-penguin-3/';
-    extractLinksFromPage(domain, testPage, 1, 1, function (streams) {
+    extractLinksFromPage(domain, testPage, 1, 1, 'The Penguin', function (streams) {
       if (streams && streams.length > 0) {
         return resolve(streams);
       }
       var fallbackPage = domain + '/slow-horses-10/';
-      extractLinksFromPage(domain, fallbackPage, 1, 5, function (fbStreams) {
+      extractLinksFromPage(domain, fallbackPage, 1, 5, 'Slow Horses', function (fbStreams) {
         if (fbStreams && fbStreams.length > 0) {
           return resolve(fbStreams);
         }
@@ -1528,7 +1528,7 @@ function getStreams(id, type, season, episode, providerContext) {
           var q = queries[qIdx++];
           searchSeries(domain, q, seasonNum, function (pageUrl) {
             if (!pageUrl) return tryNextQuery();
-            extractLinksFromPage(domain, pageUrl, seasonNum, episodeNum, function (streams) {
+            extractLinksFromPage(domain, pageUrl, seasonNum, episodeNum, meta.name || meta.original_name, function (streams) {
               var resStreams = streams || [];
               if (resStreams.length > 0) {
                 _streamCache[cacheKey] = { streams: resStreams, timestamp: Date.now() };
@@ -1810,7 +1810,20 @@ function detectEpisodeLanguage(html, matchIdx, matchText) {
 // =========================================================================
 // extractLinksFromPage - Python es.py approach with Language Detection
 // =========================================================================
-function extractLinksFromPage(domain, pageUrl, seasonNum, episodeNum, cb) {
+// Nuvio Mobile shows name + quality + size, NuvioTV name + size: the details go in size, one per line.
+function _formatEsStream(s, showName, seasonNum, episodeNum) {
+  var player = (String(s.name || '').match(/MixDrop|Turbovid|DeltaBit/i) || ['Stream'])[0];
+  s.name = '\uD83C\uDF7F ES - ' + (showName || 'Eurostreaming');
+  s.size = [
+    '\uD83D\uDCFA Stagione ' + seasonNum + ' \u00B7 Episodio ' + episodeNum,
+    s.lang === 'SUB ITA' ? '\uD83C\uDF0D Originale + \uD83D\uDCAC Sub ITA' : '\uD83C\uDDEE\uD83C\uDDF9 Italiano',
+    '\uD83D\uDDA5\uFE0F ' + (s.quality || '720p'),
+    '\u25B6\uFE0F ' + player
+  ].join('\n');
+  s.title = s.name + '\n' + s.size;
+}
+
+function extractLinksFromPage(domain, pageUrl, seasonNum, episodeNum, showName, cb) {
   esFetch(pageUrl, function (err, html) {
     if (err || !html) return cb(null);
     var streams = [];
@@ -1872,6 +1885,7 @@ function extractLinksFromPage(domain, pageUrl, seasonNum, episodeNum, cb) {
             resolved = true;
             if (streams.length === 0) return cb(null);
             probeStreamsResolution(streams, function (finalStreams) {
+              finalStreams.forEach(function (s) { _formatEsStream(s, showName, seasonNum, episodeNum); });
               cb(finalStreams.length > 0 ? finalStreams : null);
             });
           }
@@ -1973,28 +1987,6 @@ function probeStreamsResolution(streams, cb) {
   if (!streams || streams.length === 0) return cb([]);
   var pending = streams.length;
   streams.forEach(function (s) {
-    function applyLabels() {
-      var langTag = s.lang ? (" [" + s.lang + "]") : "";
-      if (s.title) {
-        s.title = s.title.replace(/\s+(?:1080p|720p|480p|HD)\b/gi, "").trim();
-        s.title = s.title.replace(/\s*\[(?:ITA|SUB ITA)\]/gi, "").trim();
-        if (s.title.indexOf("(Clicka)") >= 0) {
-          s.title = s.title.replace("(Clicka)", (s.quality || "720p") + langTag + " (Clicka)");
-        } else {
-          s.title = s.title + " " + (s.quality || "720p") + langTag;
-        }
-      }
-      if (s.name) {
-        s.name = s.name.replace(/\s+(?:1080p|720p|480p|HD)\b/gi, "").trim();
-        s.name = s.name.replace(/\s*\[(?:ITA|SUB ITA)\]/gi, "").trim();
-        if (s.name.indexOf("(Clicka)") >= 0) {
-          s.name = s.name.replace("(Clicka)", (s.quality || "720p") + langTag + " (Clicka)");
-        } else {
-          s.name = s.name + " " + (s.quality || "720p") + langTag;
-        }
-      }
-    }
-
     probeResolution(s.url, s.headers)
       .then(function (dims) {
         if (dims) {
@@ -2006,19 +1998,14 @@ function probeStreamsResolution(streams, cb) {
             s.quality = "480p";
           }
         }
-        applyLabels();
       })
-      .catch(function () {
-        applyLabels();
-      })
+      .catch(function () { })
       .then(function () {
         pending--;
         if (pending === 0) {
           // Sort: ITA streams first, SUB ITA streams second
           streams.sort(function (a, b) {
-            var aSub = (a.lang === "SUB ITA" || /SUB/i.test(a.title || "")) ? 1 : 0;
-            var bSub = (b.lang === "SUB ITA" || /SUB/i.test(b.title || "")) ? 1 : 0;
-            return aSub - bSub;
+            return (a.lang === "SUB ITA" ? 1 : 0) - (b.lang === "SUB ITA" ? 1 : 0);
           });
           cb(streams);
         }
