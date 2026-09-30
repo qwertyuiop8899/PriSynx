@@ -1983,6 +1983,18 @@ function probeResolution(streamUrl, headers) {
   });
 }
 
+function qualityRank(q) {
+  if (!q) return 0;
+  var s = String(q).toLowerCase();
+  if (s.indexOf('2160') >= 0 || s.indexOf('4k') >= 0) return 2160;
+  if (s.indexOf('1440') >= 0) return 1440;
+  if (s.indexOf('1080') >= 0) return 1080;
+  if (s.indexOf('720') >= 0) return 720;
+  if (s.indexOf('480') >= 0) return 480;
+  if (s.indexOf('360') >= 0) return 360;
+  return 0;
+}
+
 function probeStreamsResolution(streams, cb) {
   if (!streams || streams.length === 0) return cb([]);
   var pending = streams.length;
@@ -2003,9 +2015,15 @@ function probeStreamsResolution(streams, cb) {
       .then(function () {
         pending--;
         if (pending === 0) {
-          // Sort: ITA streams first, SUB ITA streams second
+          // Sort: 1) ITA streams first, SUB ITA streams second; 2) Highest resolution first
           streams.sort(function (a, b) {
-            return (a.lang === "SUB ITA" ? 1 : 0) - (b.lang === "SUB ITA" ? 1 : 0);
+            var aSub = (a.lang === "SUB ITA" || /SUB/i.test(a.title || "") || /SUB/i.test(a.size || "")) ? 1 : 0;
+            var bSub = (b.lang === "SUB ITA" || /SUB/i.test(b.title || "") || /SUB/i.test(b.size || "")) ? 1 : 0;
+            if (aSub !== bSub) return aSub - bSub;
+            var aQ = qualityRank(a.quality);
+            var bQ = qualityRank(b.quality);
+            if (aQ !== bQ) return bQ - aQ;
+            return 0;
           });
           cb(streams);
         }

@@ -652,6 +652,18 @@ function probeResolution(streamUrl, headers) {
   });
 }
 
+function qualityRank(q) {
+  if (!q) return 0;
+  var s = String(q).toLowerCase();
+  if (s.indexOf('2160') >= 0 || s.indexOf('4k') >= 0) return 2160;
+  if (s.indexOf('1440') >= 0) return 1440;
+  if (s.indexOf('1080') >= 0) return 1080;
+  if (s.indexOf('720') >= 0) return 720;
+  if (s.indexOf('480') >= 0) return 480;
+  if (s.indexOf('360') >= 0) return 360;
+  return 0;
+}
+
 function probeStreamsResolution(streams, cb) {
   if (!streams || streams.length === 0) return cb([]);
   var pending = streams.length;
@@ -671,7 +683,15 @@ function probeStreamsResolution(streams, cb) {
       .catch(function () { })
       .then(function () {
         pending--;
-        if (pending === 0) cb(streams);
+        if (pending === 0) {
+          // Sort: highest resolution first (1080p > 720p > 480p)
+          streams.sort(function (a, b) {
+            var aQ = qualityRank(a.quality);
+            var bQ = qualityRank(b.quality);
+            return bQ - aQ;
+          });
+          cb(streams);
+        }
       });
   });
 }
