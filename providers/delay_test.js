@@ -8,7 +8,8 @@ function testStream(label, url, delayMs) {
   var stream = {
     name: "\uD83E\uDDEA Test ritardo " + label,
     title: "Test ritardo " + label,
-    url: url,
+    // NuvioTV identifies streams by URL: identical URLs collapse into one label.
+    url: url + "?delay=" + (delayMs == null ? "none" : delayMs),
     quality: "1080p",
     type: "hls",
     size: "\uD83D\uDD0A " + hint + "\n\uD83D\uDC49 Apri Audio nel player: il ritardo mostrato deve essere questo + quello del dispositivo"
