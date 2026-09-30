@@ -33,6 +33,9 @@ var NUVIO_DELAY_STEP_MS = 25;
 // Largest offset to hand to NuvioTV auto-sync (±60 s).
 var AUTO_DELAY_MAX_MS = 60000;
 var NUVIO_MAX_DELAY_MS = AUTO_DELAY_MAX_MS;
+
+var AUTOSYNC_API_URL = "http://92.4.161.181:8095/plugin/jobs";
+var PRISYNX_SECRET = "prisynx-hmac-secure-2026";
 // Frame-rate pairs behind typical release speed changes (NTSC 1000/1001, PAL 25).
 var FPS_PAIRS = [[23.976, 24], [24, 25], [23.976, 25]];
 // One encode always has the same playlist length; separate encodes of a release differ by 0.5 s or more.
@@ -95,6 +98,37 @@ function getText(url, headers, ms) {
 
 function getJson(url, headers, ms) {
   return getText(url, headers, ms).then(function (text) { return JSON.parse(text); });
+}
+
+function reportUnmeasuredToAutoSync(payload) {
+  if (!AUTOSYNC_API_URL) return;
+  try {
+    fetchWithTimeout(AUTOSYNC_API_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-PriSynx-Key": PRISYNX_SECRET
+      },
+      body: JSON.stringify(payload)
+    }, 2500).catch(function () {});
+  } catch (e) {}
+}
+
+function getAutoSyncJobStatus(mediaKey) {
+  if (!AUTOSYNC_API_URL || !mediaKey) return Promise.resolve(null);
+  var url = AUTOSYNC_API_URL.replace(/\/jobs\/?$/, "/jobs/status") + "?media_key=" + encodeURIComponent(mediaKey);
+  return getJson(url, { "Accept": "application/json" }, 2500).then(function (d) {
+    if (!d || !d.items || !d.items.length) return null;
+    var running = d.items.some(function (it) { return it.status === "running"; });
+    if (running) return "running";
+    var queued = d.items.some(function (it) { return it.status === "queued"; });
+    if (queued) return "queued";
+    var incompatible = d.items.some(function (it) { return it.status === "incompatible"; });
+    if (incompatible) return "incompatible";
+    return null;
+  }).catch(function () {
+    return null;
+  });
 }
 
 function postText(url, headers, body, ms) {
@@ -568,15 +602,28 @@ function estimateSync(videoLength, itaLength) {
   return { level: "red", reason: "durata diversa di " + diffText, tag: "durata " + diffText };
 }
 
-function syncFor(enc, measured, itaLength) {
+function syncFor(enc, measured, itaLength, jobStatus) {
   var hit = null;
   (measured || []).forEach(function (m) {
     var d = Math.abs(Number(m.video_duration) - enc.length);
     if (d <= DB_LENGTH_TOLERANCE_S && (!hit || d < hit.d)) hit = { m: m, d: d };
   });
   if (!hit) {
+    if (jobStatus === "running") {
+      return { level: "yellow", jobStatus: "running", tag: "in calcolo", reason: "calcolo in corso", itaLength: itaLength };
+    }
+    if (jobStatus === "queued") {
+      return { level: "yellow", jobStatus: "queued", tag: "in coda", reason: "in coda", itaLength: itaLength };
+    }
+    if (jobStatus === "incompatible") {
+      return { level: "red", tag: "versioni diverse", reason: "versioni audio/video diverse", itaLength: itaLength };
+    }
     var guess = estimateSync(enc.length, itaLength);
     guess.itaLength = itaLength;
+    if (guess.level === "yellow") {
+      guess.jobStatus = "new";
+      guess.tag = "da misurare";
+    }
     return guess;
   }
   var sync = classifySync(hit.m);
@@ -599,10 +646,21 @@ function autoDelayMs(info) {
 
 function syncBadge(sync) {
   var icon = { green: "\uD83D\uDD0A\u2705", yellow: "\u23F1\uFE0F", red: "\u26D4" }[sync.level] || "\u2754";
+  if (sync.jobStatus === "running") icon = "\u2699\uFE0F";
+  else if (sync.jobStatus === "queued" || sync.jobStatus === "new") icon = "\u23F3";
   var short = icon + " " + sync.tag;
   if (sync.level === "green") return { short: short, line: icon + " Audio in sync" };
   if (sync.level === "yellow" && sync.delayMs !== undefined) {
     return { short: short, line: icon + " Ritardo audio " + formatDelay(sync.delayMs) + " applicato in automatico (NuvioTV); altrimenti impostalo a mano" };
+  }
+  if (sync.jobStatus === "running") {
+    return { short: short, line: icon + " Calcolo offset in corso su AutoSync (1-2 min)... Riapri tra poco." };
+  }
+  if (sync.jobStatus === "queued") {
+    return { short: short, line: icon + " In coda su AutoSync (calcolo a breve)... Riapri tra poco." };
+  }
+  if (sync.jobStatus === "new") {
+    return { short: short, line: icon + " Misurazione offset avviata in background. Sar\u00E0 pronta alla prossima apertura." };
   }
   if (sync.level === "yellow") return { short: short, line: icon + " Offset non misurato, da provare (" + sync.reason + ")" };
   if (sync.level === "red") return { short: short, line: icon + " Audio non in sync, non riproducibile (" + sync.reason + ")" };
@@ -641,6 +699,7 @@ function getStreams(tmdbId, mediaType, season, episode) {
     var meta = yield tmdbMeta(id, isTv);
     if (!meta.title) return [];
     var ctx = { id: id, meta: meta, isTv: isTv, season: season, episode: episode, deadline: deadline };
+    var mediaKey = (isTv ? "series" : "movie") + ":" + meta.imdbId + ":" + (isTv ? Number(season) : 0) + ":" + (isTv ? Number(episode) : 0);
 
     var results = yield Promise.all([
       getItalianTracks(id, isTv, season, episode).catch(function (e) {
@@ -648,12 +707,49 @@ function getStreams(tmdbId, mediaType, season, episode) {
         return null;
       }),
       getMeasuredRenditions(meta, isTv, season, episode),
-      collectEncodes(ctx)
+      collectEncodes(ctx),
+      getAutoSyncJobStatus(mediaKey)
     ]);
-    var ita = results[0], measured = results[1], encodes = results[2];
+    var ita = results[0], measured = results[1], encodes = results[2], autoJobStatus = results[3];
     if (!encodes.length) {
       console.warn("[DualSync] no 4K/FHD video for " + meta.title);
       return [];
+    }
+
+    // Trigger background measurement on AutoSync if any encode is unmeasured
+    var unmeasuredEncodes = encodes.filter(function (enc) {
+      return !(measured || []).some(function (m) {
+        return Math.abs(Number(m.video_duration) - enc.length) <= DB_LENGTH_TOLERANCE_S;
+      });
+    });
+    if (ita && unmeasuredEncodes.length) {
+      var autoItems = unmeasuredEncodes.map(function (enc) {
+        var rends = Object.keys(enc.renditions || {}).filter(function (q) {
+          return Number(q) >= 1080;
+        }).map(function (q) {
+          return { resolution: Number(q), url: enc.renditions[q].url };
+        });
+        return {
+          provider: enc.site ? enc.site.toLowerCase() : "dualsync",
+          server: enc.server || "default",
+          video_duration: enc.length || 0,
+          headers: enc.headers || {},
+          renditions: rends
+        };
+      }).filter(function (it) {
+        return it.renditions.length > 0 && it.video_duration >= 30;
+      });
+      if (autoItems.length) {
+        reportUnmeasuredToAutoSync({
+          media_key: mediaKey,
+          audio: {
+            source: "vixsrc",
+            base_url: ita.audio.uri,
+            headers: ita.headers || {}
+          },
+          items: autoItems.slice(0, 3)
+        });
+      }
     }
 
     // The ITA length is only needed for encodes ToastFlix never measured.
@@ -671,7 +767,7 @@ function getStreams(tmdbId, mediaType, season, episode) {
     var heading = "\uD83D\uDCC1 " + meta.title + (isTv ? " S" + pad2(season) + "E" + pad2(episode) : "") + (meta.year ? " (" + meta.year + ")" : "");
     var streams = [];
     encodes.forEach(function (enc) {
-      var sync = syncFor(enc, measured, itaLength), badge = syncBadge(sync);
+      var sync = syncFor(enc, measured, itaLength, autoJobStatus), badge = syncBadge(sync);
       enc.qualities.forEach(function (qkey) {
         var rendition = enc.renditions[qkey];
         if (!rendition) return;

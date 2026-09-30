@@ -32,6 +32,9 @@ var NUVIO_DELAY_STEP_MS = 25;
 // Largest offset to hand to NuvioTV auto-sync (±60 s).
 var AUTO_DELAY_MAX_MS = 60000;
 var NUVIO_MAX_DELAY_MS = AUTO_DELAY_MAX_MS;
+
+var AUTOSYNC_API_URL = "http://92.4.161.181:8095/plugin/jobs";
+var PRISYNX_SECRET = "prisynx-hmac-secure-2026";
 // Frame-rate pairs behind typical release speed changes (NTSC 1000/1001, PAL 25).
 var FPS_PAIRS = [[23.976, 24], [24, 25], [23.976, 25]];
 
@@ -90,6 +93,37 @@ function getText(url, headers, ms) {
 
 function getJson(url, headers, ms) {
   return getText(url, headers, ms).then(function (text) { return JSON.parse(text); });
+}
+
+function reportUnmeasuredToAutoSync(payload) {
+  if (!AUTOSYNC_API_URL) return;
+  try {
+    fetchWithTimeout(AUTOSYNC_API_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-PriSynx-Key": PRISYNX_SECRET
+      },
+      body: JSON.stringify(payload)
+    }, 2500).catch(function () {});
+  } catch (e) {}
+}
+
+function getAutoSyncJobStatus(mediaKey) {
+  if (!AUTOSYNC_API_URL || !mediaKey) return Promise.resolve(null);
+  var url = AUTOSYNC_API_URL.replace(/\/jobs\/?$/, "/jobs/status") + "?media_key=" + encodeURIComponent(mediaKey);
+  return getJson(url, { "Accept": "application/json" }, 2500).then(function (d) {
+    if (!d || !d.items || !d.items.length) return null;
+    var running = d.items.some(function (it) { return it.status === "running"; });
+    if (running) return "running";
+    var queued = d.items.some(function (it) { return it.status === "queued"; });
+    if (queued) return "queued";
+    var incompatible = d.items.some(function (it) { return it.status === "incompatible"; });
+    if (incompatible) return "incompatible";
+    return null;
+  }).catch(function () {
+    return null;
+  });
 }
 
 function toQuery(params) {
@@ -236,7 +270,8 @@ function tmdbMeta(tmdbId, isTv) {
     return {
       title: (isTv ? d.name : d.title) || "",
       year: ((isTv ? d.first_air_date : d.release_date) || "").slice(0, 4),
-      imdbId: (d.external_ids && d.external_ids.imdb_id) || d.imdb_id || ""
+      imdbId: (d.external_ids && d.external_ids.imdb_id) || d.imdb_id || "",
+      runtime: d.runtime || (d.episode_run_time && d.episode_run_time[0]) || 90
     };
   });
 }
@@ -531,19 +566,34 @@ function classifySync(d) {
 // Offsets measured by ToastFlix for Movy video vs vixsrc audio; positive offset = audio must be delayed.
 function getSyncStatus(meta, isTv, season, episode) {
   if (!meta.imdbId) return Promise.resolve({ level: "red", reason: "titolo senza IMDb", tag: "no IMDb" });
+  var mediaKey = (isTv ? "series" : "movie") + ":" + meta.imdbId + ":" + (isTv ? Number(season) : 0) + ":" + (isTv ? Number(episode) : 0);
   var url = TOASTFLIX_URL + "/dual/offset/status?imdb=" + encodeURIComponent(meta.imdbId) +
     "&type=" + (isTv ? "series" : "movie") + "&season=" + (isTv ? Number(season) : 0) +
     "&episode=" + (isTv ? Number(episode) : 0) + "&provider=movy&audio_source=vixsrc";
   return getJson(url, { "Accept": "application/json" }, 8000).then(function (d) {
-    if (!d || !d.found) return { level: "red", reason: "offset non presente nel DB", tag: "no offset" };
-    var sync = classifySync(d);
-    sync.info = {
-      status: d.status,
-      offsetMs: d.offset == null ? null : Math.round(Number(d.offset) * 1000),
-      rate: Number(d.rate || 1),
-      hasCuts: !!d.has_cuts
-    };
-    return sync;
+    if (d && d.found) {
+      var sync = classifySync(d);
+      sync.info = {
+        status: d.status,
+        offsetMs: d.offset == null ? null : Math.round(Number(d.offset) * 1000),
+        rate: Number(d.rate || 1),
+        hasCuts: !!d.has_cuts
+      };
+      return sync;
+    }
+    // Not found in ToastFlix: check AutoSync job queue
+    return getAutoSyncJobStatus(mediaKey).then(function (jobStatus) {
+      if (jobStatus === "running") {
+        return { level: "yellow", jobStatus: "running", reason: "calcolo in corso", tag: "in calcolo" };
+      }
+      if (jobStatus === "queued") {
+        return { level: "yellow", jobStatus: "queued", reason: "in coda", tag: "in coda" };
+      }
+      if (jobStatus === "incompatible") {
+        return { level: "red", reason: "versioni audio/video diverse", tag: "versioni diverse" };
+      }
+      return { level: "yellow", jobStatus: "new", reason: "offset da misurare", tag: "da misurare" };
+    });
   }).catch(function (e) {
     console.warn("[MovyITA] ToastFlix sync status: " + e.message);
     return { level: "unknown", reason: "ToastFlix non raggiungibile", tag: "sync n/d" };
@@ -559,9 +609,22 @@ function autoDelayMs(info) {
 
 function syncBadge(sync) {
   var icon = { green: "\uD83D\uDD0A\u2705", yellow: "\u23F1\uFE0F", red: "\u26D4" }[sync.level] || "\u2754";
+  if (sync.jobStatus === "running") icon = "\u2699\uFE0F";
+  else if (sync.jobStatus === "queued" || sync.jobStatus === "new") icon = "\u23F3";
   var short = icon + " " + sync.tag;
   if (sync.level === "green") return { short: short, line: icon + " Audio in sync" };
-  if (sync.level === "yellow") return { short: short, line: icon + " Ritardo audio " + formatDelay(sync.delayMs) + " applicato in automatico (NuvioTV); altrimenti impostalo a mano" };
+  if (sync.level === "yellow" && sync.delayMs !== undefined) {
+    return { short: short, line: icon + " Ritardo audio " + formatDelay(sync.delayMs) + " applicato in automatico (NuvioTV); altrimenti impostalo a mano" };
+  }
+  if (sync.jobStatus === "running") {
+    return { short: short, line: icon + " Calcolo offset in corso su AutoSync (1-2 min)... Riapri tra poco." };
+  }
+  if (sync.jobStatus === "queued") {
+    return { short: short, line: icon + " In coda su AutoSync (calcolo a breve)... Riapri tra poco." };
+  }
+  if (sync.jobStatus === "new") {
+    return { short: short, line: icon + " Misurazione offset avviata in background. Sar\u00E0 pronta alla prossima apertura." };
+  }
   if (sync.level === "red") return { short: short, line: icon + " Audio non in sync, non riproducibile (" + sync.reason + ")" };
   return { short: short, line: icon + " Sync audio non verificato (" + sync.reason + ")" };
 }
@@ -598,10 +661,40 @@ function getStreams(tmdbId, mediaType, season, episode) {
       getSyncStatus(meta, isTv, season, episode)
     ]);
     var movy = results[0], ita = results[1], measuredSync = results[2];
-    var unmeasuredSync = { level: "unknown", reason: "server con file diverso da Miami", tag: "non misurato" };
+    var unmeasuredSync = measuredSync.jobStatus ? measuredSync : { level: "unknown", reason: "server con file diverso da Miami", tag: "non misurato" };
     if (!movy.sources.length) {
       console.warn("[MovyITA] no Movy sources for " + meta.title);
       return [];
+    }
+
+    // Trigger background measurement on AutoSync if offset not yet established
+    if (ita && (!measuredSync.info || measuredSync.info.status !== "ok") && movy.sources.length) {
+      var byServer = {};
+      movy.sources.forEach(function (s) {
+        if (Number(s.qkey) < 1080) return;
+        if (!byServer[s.server]) byServer[s.server] = [];
+        byServer[s.server].push({ resolution: Number(s.qkey), url: s.url });
+      });
+      var autoItems = Object.keys(byServer).slice(0, 2).map(function (srv) {
+        return {
+          provider: "movy",
+          server: srv,
+          video_duration: (meta.runtime || 90) * 60,
+          headers: movy.headers || {},
+          renditions: byServer[srv]
+        };
+      });
+      if (autoItems.length) {
+        reportUnmeasuredToAutoSync({
+          media_key: (isTv ? "series" : "movie") + ":" + meta.imdbId + ":" + (isTv ? Number(season) : 0) + ":" + (isTv ? Number(episode) : 0),
+          audio: {
+            source: "vixsrc",
+            base_url: ita.audio.uri,
+            headers: ita.headers || {}
+          },
+          items: autoItems
+        });
+      }
     }
 
     var heading = "\uD83D\uDCC1 " + meta.title + (isTv ? " S" + pad2(season) + "E" + pad2(episode) : "") + (meta.year ? " (" + meta.year + ")" : "");
