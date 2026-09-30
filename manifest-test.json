@@ -1,0 +1,22 @@
+{
+  "name": "PriSynx Test",
+  "version": "1.0.0",
+  "description": "Solo per test: flussi con behaviorHints.audioDelayMs",
+  "author": "local",
+  "scrapers": [
+    {
+      "id": "prisynx-delay-test",
+      "name": "Test ritardo audio",
+      "description": "Flussi di prova con ritardo audio impostato dal plugin",
+      "version": "1.0.0",
+      "author": "local",
+      "resources": ["stream"],
+      "idPrefixes": ["tmdb:", "tt"],
+      "supportedTypes": ["movie", "series", "tv"],
+      "filename": "providers/delay_test.js",
+      "enabled": true,
+      "contentLanguage": ["it", "en"],
+      "formats": ["m3u8"]
+    }
+  ]
+}
