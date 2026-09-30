@@ -1101,6 +1101,7 @@ function extractDeltabit(pageUrl, jar) {
         var finalOrigin = _getUrlOrigin(pageUrl);
         var source = _findStreamSource(html);
         if (source) return resolve({ url: source, headers: { 'User-Agent': landingHeaders['User-Agent'], 'Referer': pageUrl, 'Origin': finalOrigin } });
+        if (/maintenance mode/i.test(html)) return reject(new Error('Deltabit: server in maintenance'));
         // Parse form
         var formData = {};
         var ir = /<input\b[^>]*>/gi;
@@ -1246,8 +1247,8 @@ function resolveClickacc(startUrl, kind, jar) {
             behaviorHints: { notWebReady: true },
             headers: { "User-Agent": ES_UA, "Referer": "https://" + res.host + "/" }
           };
-        }).catch(function () {
-          return Promise.reject(new Error('MixDrop extraction failed'));
+        }).catch(function (err) {
+          return Promise.reject(err && err.fileGone ? err : new Error('MixDrop extraction failed'));
         });
       }
     }
@@ -1844,6 +1845,8 @@ function extractLinksFromPage(domain, pageUrl, seasonNum, episodeNum, cb) {
     // Resolve clicka.cc URLs in parallel
     var resolved = false;
     var pending = clickaTasks.length;
+    var failures = [];
+    var HOST_LABEL = { tv: 'Turbovid', mix: 'MixDrop', delta: 'DeltaBit' };
 
     clickaTasks.forEach(function (task) {
       var taskJar = {};
@@ -1856,7 +1859,9 @@ function extractLinksFromPage(domain, pageUrl, seasonNum, episodeNum, cb) {
           }
         })
         .catch(function (e) {
-          console.warn('[Eurostreaming] ' + task.kind + ' ' + task.url + ' failed: ' + (e && e.message ? e.message : e));
+          var msg = e && e.message ? e.message : String(e);
+          failures.push((HOST_LABEL[task.kind] || task.kind) + ' ' + (task.lang || 'ITA') + ': ' + msg);
+          console.warn('[Eurostreaming] ' + task.kind + ' ' + task.url + ' failed: ' + msg);
         })
         .then(function () {
           pending--;
@@ -1864,6 +1869,8 @@ function extractLinksFromPage(domain, pageUrl, seasonNum, episodeNum, cb) {
             resolved = true;
             if (streams.length === 0) return cb(null);
             probeStreamsResolution(streams, function (finalStreams) {
+              // Shown under the first link in Nuvio, so missing links can be diagnosed on the device.
+              if (failures.length && finalStreams.length) finalStreams[0].size = '\u26A0\uFE0F Non trovati: ' + failures.join(' \u00B7 ');
               cb(finalStreams.length > 0 ? finalStreams : null);
             });
           }
