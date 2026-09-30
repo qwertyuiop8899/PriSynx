@@ -106,7 +106,7 @@ function getStreams(id, type, season, episode) {
           if (meta && meta.name) return doSearch(meta.name, meta.releaseInfo || '');
           resolve([]);
         });
-      });
+      }).catch(function () { resolve([]); });
     });
   });
 }
