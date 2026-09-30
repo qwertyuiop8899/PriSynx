@@ -1,6 +1,6 @@
 {
   "name": "PriSynx",
-  "version": "1.0.1",
+  "version": "1.0.0",
   "description": "Video da fonti internazionali con sync audio italiano",
   "author": "local",
   "scrapers": [
@@ -40,7 +40,7 @@
       "id": "prisynx-cb01",
       "name": "CB01",
       "description": "Film e Serie TV da CB01 (MixDrop HD/SD)",
-      "version": "1.0.1",
+      "version": "1.0.0",
       "resources": ["stream"],
       "idPrefixes": ["tmdb:", "tt"],
       "supportedTypes": ["movie", "series", "tv"],
@@ -53,7 +53,7 @@
       "id": "prisynx-eurostreaming",
       "name": "Eurostreaming",
       "description": "Serie TV da Eurostreaming (MixDrop, Turbovid, DeltaBit)",
-      "version": "1.0.1",
+      "version": "1.0.0",
       "resources": ["stream"],
       "idPrefixes": ["tmdb:", "tt"],
       "supportedTypes": ["series", "tv"],
