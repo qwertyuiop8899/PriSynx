@@ -106,12 +106,12 @@ function _decodeEntities(s) {
     .replace(/&amp;/g, '&');
 }
 
-// Waits until `ms` (at least 3.6 s) have passed since `since`, so links opened together share one wait.
-// Blocking like the original: timer support differs between Nuvio runtimes and versions.
-function _sleep(ms, since) {
-  var until = (since || Date.now()) + Math.max(ms || 1000, 3600);
+// Blocking on purpose: timer support differs between Nuvio runtimes and versions.
+function _sleep(ms) {
   return new Promise(function (resolve) {
-    while (Date.now() < until) {}
+    var waitMs = Math.max(ms || 1000, 3600);
+    var start = Date.now();
+    while (Date.now() - start < waitMs) {}
     resolve();
   });
 }
@@ -978,10 +978,8 @@ function extractTurbovid(pageUrl, jar) {
     };
     var cookieStr = _jarGet(pageUrl, jar);
     if (cookieStr) landingHeaders['Cookie'] = cookieStr;
-    var landedAt = 0;
     _customFetch(pageUrl, { headers: landingHeaders, redirect: "manual" }, 15000)
       .then(function (r) {
-        landedAt = Date.now();
         try {
           if (r.headers && r.headers.get) {
             var sc = r.headers.get('set-cookie') || r.headers.get('Set-Cookie');
@@ -1022,7 +1020,7 @@ function extractTurbovid(pageUrl, jar) {
         var cookieStr2 = _jarGet(pageUrl, jar);
         if (cookieStr2) postHeaders['Cookie'] = cookieStr2;
         // Sleep 5s before POST (Turbovid requires delay)
-        return _sleep(5000, landedAt).then(function () {
+        return _sleep(5000).then(function () {
           return _customFetch(pageUrl, { method: "POST", headers: postHeaders, body: _formEncode(formData), redirect: "manual" }, 30000);
         });
       })
@@ -1089,10 +1087,8 @@ function extractDeltabit(pageUrl, jar) {
     };
     var cookieStr = _jarGet(pageUrl, jar);
     if (cookieStr) landingHeaders['Cookie'] = cookieStr;
-    var landedAt = 0;
     _customFetch(pageUrl, { headers: landingHeaders }, 15000)
       .then(function (r) {
-        landedAt = Date.now();
         try {
           if (r.headers && r.headers.get) {
             var sc = r.headers.get('set-cookie') || r.headers.get('Set-Cookie');
@@ -1132,7 +1128,7 @@ function extractDeltabit(pageUrl, jar) {
         var cookieStr2 = _jarGet(pageUrl, jar);
         if (cookieStr2) postHeaders['Cookie'] = cookieStr2;
         // Sleep 2.5s before POST
-        return _sleep(2500, landedAt).then(function () {
+        return _sleep(2500).then(function () {
           return _customFetch(pageUrl, { method: "POST", headers: postHeaders, body: _formEncode(formData) }, 30000);
         });
       })
@@ -1859,7 +1855,9 @@ function extractLinksFromPage(domain, pageUrl, seasonNum, episodeNum, cb) {
             streams.push(streamObj);
           }
         })
-        .catch(function () { })
+        .catch(function (e) {
+          console.warn('[Eurostreaming] ' + task.kind + ' ' + task.url + ' failed: ' + (e && e.message ? e.message : e));
+        })
         .then(function () {
           pending--;
           if (pending === 0 && !resolved) {
