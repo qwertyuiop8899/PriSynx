@@ -608,6 +608,18 @@ function syncFor(enc, measured, itaLength, jobStatus) {
     var d = Math.abs(Number(m.video_duration) - enc.length);
     if (d <= DB_LENGTH_TOLERANCE_S && (!hit || d < hit.d)) hit = { m: m, d: d };
   });
+  if (hit && hit.m.status === "incompatible") {
+    if (jobStatus === "running") {
+      return { level: "yellow", jobStatus: "running", tag: "in calcolo", reason: "calcolo in corso", itaLength: itaLength };
+    }
+    if (jobStatus === "queued") {
+      return { level: "yellow", jobStatus: "queued", tag: "in coda", reason: "in coda", itaLength: itaLength };
+    }
+    if (jobStatus === "incompatible") {
+      return { level: "red", tag: "versioni diverse", reason: "versioni audio/video diverse", itaLength: itaLength };
+    }
+    return { level: "yellow", jobStatus: "new", tag: "da verificare", reason: "incompatibilit\u00E0 da verificare", itaLength: itaLength };
+  }
   if (!hit) {
     if (jobStatus === "running") {
       return { level: "yellow", jobStatus: "running", tag: "in calcolo", reason: "calcolo in corso", itaLength: itaLength };
@@ -716,11 +728,17 @@ function getStreams(tmdbId, mediaType, season, episode) {
       return [];
     }
 
-    // Trigger background measurement on AutoSync if any encode is unmeasured
+    // Trigger background measurement on AutoSync if any encode is unmeasured or has unverified incompatible verdict
     var unmeasuredEncodes = encodes.filter(function (enc) {
-      return !(measured || []).some(function (m) {
-        return Math.abs(Number(m.video_duration) - enc.length) <= DB_LENGTH_TOLERANCE_S;
+      var hit = null;
+      (measured || []).forEach(function (m) {
+        var d = Math.abs(Number(m.video_duration) - enc.length);
+        if (d <= DB_LENGTH_TOLERANCE_S && (!hit || d < hit.d)) hit = m;
       });
+      if (!hit) return true;
+      if (hit.status === "ok") return false;
+      if (hit.status === "incompatible" && autoJobStatus === "incompatible") return false;
+      return true;
     });
     if (ita && unmeasuredEncodes.length) {
       var autoItems = unmeasuredEncodes.map(function (enc) {

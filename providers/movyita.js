@@ -572,6 +572,20 @@ function getSyncStatus(meta, isTv, season, episode) {
     "&episode=" + (isTv ? Number(episode) : 0) + "&provider=movy&audio_source=vixsrc";
   return getJson(url, { "Accept": "application/json" }, 8000).then(function (d) {
     if (d && d.found) {
+      if (d.status === "incompatible") {
+        return getAutoSyncJobStatus(mediaKey).then(function (jobStatus) {
+          if (jobStatus === "running") {
+            return { level: "yellow", jobStatus: "running", reason: "calcolo in corso", tag: "in calcolo" };
+          }
+          if (jobStatus === "queued") {
+            return { level: "yellow", jobStatus: "queued", reason: "in coda", tag: "in coda" };
+          }
+          if (jobStatus === "incompatible") {
+            return { level: "red", reason: "versioni audio/video diverse", tag: "versioni diverse" };
+          }
+          return { level: "yellow", jobStatus: "new", reason: "incompatibilit\u00E0 da verificare", tag: "da verificare" };
+        });
+      }
       var sync = classifySync(d);
       sync.info = {
         status: d.status,
@@ -667,8 +681,8 @@ function getStreams(tmdbId, mediaType, season, episode) {
       return [];
     }
 
-    // Trigger background measurement on AutoSync if offset not yet established
-    if (ita && (!measuredSync.info || measuredSync.info.status !== "ok") && movy.sources.length) {
+    // Trigger background measurement on AutoSync if offset not yet established (and not confirmed incompatible)
+    if (ita && (!measuredSync.info || measuredSync.info.status !== "ok") && measuredSync.jobStatus !== "incompatible" && movy.sources.length) {
       var byServer = {};
       movy.sources.forEach(function (s) {
         if (Number(s.qkey) < 1080) return;
