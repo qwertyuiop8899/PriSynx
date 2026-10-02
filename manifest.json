@@ -61,6 +61,19 @@
       "enabled": true,
       "contentLanguage": ["it"],
       "formats": ["mp4", "m3u8"]
+    },
+    {
+      "id": "vixsrc",
+      "name": "VixSrc",
+      "description": "Film e Serie TV da VixSrc in HD/FHD con audio e sottotitoli italiani",
+      "version": "1.0.0",
+      "resources": ["stream"],
+      "idPrefixes": ["tmdb:", "tt"],
+      "supportedTypes": ["movie", "series", "tv"],
+      "filename": "providers/vixsrc.js",
+      "enabled": true,
+      "contentLanguage": ["it"],
+      "formats": ["m3u8"]
     }
   ]
 }
