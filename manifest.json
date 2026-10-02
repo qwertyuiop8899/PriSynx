@@ -87,6 +87,19 @@
       "enabled": true,
       "contentLanguage": ["it"],
       "formats": ["m3u8"]
+    },
+    {
+      "id": "animeunity",
+      "name": "AnimeUnity",
+      "description": "Anime in streaming ITA e SUB-ITA da AnimeUnity in HLS (VixCloud)",
+      "version": "1.0.0",
+      "resources": ["stream"],
+      "idPrefixes": ["kitsu:", "mal:", "anilist:", "anidb:", "tmdb:", "tt"],
+      "supportedTypes": ["movie", "series", "tv", "anime"],
+      "filename": "providers/animeunity.js",
+      "enabled": true,
+      "contentLanguage": ["it", "ja"],
+      "formats": ["m3u8"]
     }
   ]
 }
