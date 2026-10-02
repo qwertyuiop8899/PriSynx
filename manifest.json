@@ -74,6 +74,19 @@
       "enabled": true,
       "contentLanguage": ["it"],
       "formats": ["m3u8"]
+    },
+    {
+      "id": "pa-cc",
+      "name": "Partite.cc",
+      "description": "Film e Serie TV da Partite.cc in HLS con traccia audio italiana",
+      "version": "1.0.0",
+      "resources": ["stream"],
+      "idPrefixes": ["tmdb:", "tt", "kitsu:", "mal:", "anilist:", "anidb:"],
+      "supportedTypes": ["movie", "series", "tv"],
+      "filename": "providers/pa.cc.js",
+      "enabled": true,
+      "contentLanguage": ["it"],
+      "formats": ["m3u8"]
     }
   ]
 }
