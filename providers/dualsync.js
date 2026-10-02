@@ -50,6 +50,23 @@ var QUALITY_INFO = {
   "1080": { label: "1080p", resolution: "1920x1080", bandwidth: 6000000 }
 };
 
+var ZW_PREFIX = ["\u200B", "\u200C", "\u200D", "\u2060", "\u2061", "\u2062", "\u2063", "\u2064"];
+
+function sortPrefix(qualityKey, syncLevel) {
+  var qNum = Number(String(qualityKey || "").replace(/[^0-9]/g, "")) || 0;
+  var r = 3;
+  if (qNum >= 2160) r = 0;
+  else if (qNum >= 1080) r = 1;
+  else if (qNum >= 720) r = 2;
+
+  var s = 2;
+  if (syncLevel === "green" || syncLevel === 0) s = 0;
+  else if (syncLevel === "yellow" || syncLevel === 1) s = 1;
+  else if (syncLevel === "red" || syncLevel === 3) s = 3;
+
+  return ZW_PREFIX[r] + ZW_PREFIX[s];
+}
+
 function __async(gen) {
   return new Promise(function (resolve, reject) {
     function step(method, arg) {
@@ -796,7 +813,7 @@ function getStreams(tmdbId, mediaType, season, episode) {
           : "\uD83C\uDF0D Solo audio originale (ITA non trovato)") +
           "\n\uD83C\uDFAC " + enc.site + " \u00B7 " + enc.server + (ita && ita.subtitles.length ? " \u00B7 Sub ITA" : "");
         streams.push({
-          name: "DualSync " + q.label + (ita ? " \uD83C\uDDEE\uD83C\uDDF9 " + badge.short : ""),
+          name: sortPrefix(qkey, ita ? sync.level : "unknown") + "DualSync " + q.label + (ita ? " \uD83C\uDDEE\uD83C\uDDF9 " + badge.short : ""),
           title: heading + "\n" + details,
           // Text under the name: NuvioTV shows `size + language` (instead of `title`), Nuvio Mobile shows
           // `quality + size + language` and ignores `title`. So the details go in `size` for both apps.

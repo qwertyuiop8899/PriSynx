@@ -3,6 +3,23 @@
  * with clicka.cc captcha OCR resolution (pure JS, zero dependencies).
  */
 
+var ZW_PREFIX = ["\u200B", "\u200C", "\u200D", "\u2060", "\u2061", "\u2062", "\u2063", "\u2064"];
+
+function sortPrefix(qualityKey, syncLevel) {
+  var qNum = Number(String(qualityKey || "").replace(/[^0-9]/g, "")) || 0;
+  var r = 3;
+  if (qNum >= 2160) r = 0;
+  else if (qNum >= 1080) r = 1;
+  else if (qNum >= 720) r = 2;
+
+  var s = 2;
+  if (syncLevel === "green" || syncLevel === 0) s = 0;
+  else if (syncLevel === "yellow" || syncLevel === 1) s = 1;
+  else if (syncLevel === "red" || syncLevel === 3) s = 3;
+
+  return ZW_PREFIX[r] + ZW_PREFIX[s];
+}
+
 // =========================================================================
 // ZERO-DEPENDENCY INFLATER (pure JS zlib inflater)
 // =========================================================================
@@ -1393,7 +1410,7 @@ function _runNuvioTest(resolve) {
         }
         resolve([{
           url: "https://a-delivery36.mxcontent.net/v2/xw18kr1mtpke63.mp4",
-          name: "Eurostreaming - MixDrop [Test]",
+          name: sortPrefix("720p", 2) + "Eurostreaming - MixDrop [Test]",
           title: "MixDrop [Test]",
           quality: "720p",
           behaviorHints: { notWebReady: true },
@@ -1813,7 +1830,8 @@ function detectEpisodeLanguage(html, matchIdx, matchText) {
 // Nuvio Mobile shows name + quality + size, NuvioTV name + size: the details go in size, one per line.
 function _formatEsStream(s, showName, seasonNum, episodeNum) {
   var player = (String(s.name || '').match(/MixDrop|Turbovid|DeltaBit/i) || ['Stream'])[0];
-  s.name = '\uD83C\uDF7F ES - ' + (showName || 'Eurostreaming');
+  var subRank = (s.lang === 'SUB ITA' || /SUB/i.test(s.lang || '')) ? 3 : 2;
+  s.name = sortPrefix(s.quality || '720p', subRank) + '\uD83C\uDF7F ES - ' + (showName || 'Eurostreaming');
   s.size = [
     '\uD83D\uDCFA Stagione ' + seasonNum + ' \u00B7 Episodio ' + episodeNum,
     s.lang === 'SUB ITA' ? '\uD83C\uDF0D Originale + \uD83D\uDCAC Sub ITA' : '\uD83C\uDDEE\uD83C\uDDF9 Italiano',

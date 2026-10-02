@@ -1,6 +1,23 @@
 var USER_AGENT = 'Mozilla/5.0 (Linux; Android 13; Android TV) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 var TMDB_API_KEY = '68e094699525b18a70bab2f86b1fa706';
 
+var ZW_PREFIX = ["\u200B", "\u200C", "\u200D", "\u2060", "\u2061", "\u2062", "\u2063", "\u2064"];
+
+function sortPrefix(qualityKey, syncLevel) {
+  var qNum = Number(String(qualityKey || "").replace(/[^0-9]/g, "")) || 0;
+  var r = 3;
+  if (qNum >= 2160) r = 0;
+  else if (qNum >= 1080) r = 1;
+  else if (qNum >= 720) r = 2;
+
+  var s = 2;
+  if (syncLevel === "green" || syncLevel === 0) s = 0;
+  else if (syncLevel === "yellow" || syncLevel === 1) s = 1;
+  else if (syncLevel === "red" || syncLevel === 3) s = 3;
+
+  return ZW_PREFIX[r] + ZW_PREFIX[s];
+}
+
 function _cbTmdbMeta(id, type) {
   return new Promise(function(resolve) {
     var cleanId = String(id || '').replace(/^tmdb:/, '');
@@ -337,7 +354,7 @@ function extractMixDrop(mdId, quality, cb, linkHost) {
       var streamLabel = isHD ? "MixDrop HD" : "MixDrop";
       cb({
         url: streamUrl,
-        name: "CB01 - " + streamLabel,
+        name: sortPrefix(isHD ? '1080' : (quality || '720')) + "CB01 - " + streamLabel,
         title: streamLabel,
         quality: isHD ? '1080p' : (quality || '720p'),
         behaviorHints: { notWebReady: true },
