@@ -1,6 +1,11 @@
-# PriSynx (MovyITA & DualSync)
+# PriSynx Suite
 
-Suite di plugin per **Nuvio** che combina video ad altissima definizione (4K / 1080p da Movy, Vidfast, Cinejoy) con audio italiano (StreamingCommunity / VX), assemblando al volo un master stream HLS multi-traccia (`data://application/m3u8/...`).
+Suite di plugin per **Nuvio** per lo streaming in italiano e internazionale:
+* **MovyITA**: Video FHD da Movy con audio italiano e audio originale
+* **DualSync**: Video 4K/FHD (Cinejoy, Vidfast) con audio italiano muxato e offset ToastFlix / AutoSync
+* **VixSrc**: Streaming diretto HLS da VixSrc in FHD/HD con audio e sottotitoli italiani
+* **CB01**: Film e Serie TV da CB01 (MixDrop HD/SD)
+* **Eurostreaming**: Serie TV da Eurostreaming (MixDrop, Turbovid, DeltaBit)
 
 ---
 
