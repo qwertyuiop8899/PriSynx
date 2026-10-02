@@ -1,6 +1,6 @@
 {
   "name": "PriSynx",
-  "version": "1.1.0",
+  "version": "1.1.2",
   "description": "Video da fonti internazionali con sync audio italiano",
   "author": "local",
   "scrapers": [
@@ -77,9 +77,9 @@
     },
     {
       "id": "pa-cc",
-      "name": "Partite.cc",
+      "name": "PaCC",
       "description": "Film e Serie TV da Partite.cc in HLS con traccia audio italiana",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "resources": ["stream"],
       "idPrefixes": ["tmdb:", "tt", "kitsu:", "mal:", "anilist:", "anidb:"],
       "supportedTypes": ["movie", "series", "tv"],
