@@ -5,6 +5,7 @@ Suite di plugin per **Nuvio** per lo streaming in italiano e internazionale:
 * **DualSync**: Video 4K/FHD (Cinejoy, Vidfast) con audio italiano muxato e offset ToastFlix / AutoSync
 * **VixSrc**: Streaming diretto HLS da VixSrc in FHD/HD con audio e sottotitoli italiani
 * **Partite.cc (pa.cc)**: Streaming diretto HLS da Partite.cc con supporto multi-audio italiano e sottotitoli
+* **AnimeUnity**: Streaming diretto HLS (VixCloud) per anime sia in versione doppiata (ITA) che sottotitolata (SUB-ITA)
 * **CB01**: Film e Serie TV da CB01 (MixDrop HD/SD)
 * **Eurostreaming**: Serie TV da Eurostreaming (MixDrop, Turbovid, DeltaBit)
 
