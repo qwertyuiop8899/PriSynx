@@ -404,13 +404,29 @@ function getVidfastEncodes(site, ctx, keep) {
     var html = yield getText(page, { "User-Agent": UA, "Referer": site.origin + "/" }, 12000);
     var token = (html.match(/\\"(?:en|token)\\":\\"([^"\\]+)\\"/) || [])[1];
     if (!token) throw new Error("token not found");
-    var parts = yield encdec("enc-" + site.key + "?text=" + encodeURIComponent(token));
-    var headers = { "User-Agent": UA, "Referer": site.origin + "/", "X-Requested-With": "XMLHttpRequest", "X-CSRF-Token": parts.token };
-    var serverList = yield postText(parts.servers, headers, undefined, 10000);
+
+    // Stage 1: Handshake with page token
+    var parts1 = yield encdec("enc-" + site.key + "?text=" + encodeURIComponent(token) + "&stage=1");
+    if (!parts1 || !parts1.stage1) throw new Error("stage 1 failed");
+    var headers = {
+      "User-Agent": UA,
+      "Referer": site.origin + "/",
+      "X-Requested-With": "XMLHttpRequest",
+      "X-CSRF-Token": parts1.token
+    };
+    var stage1Resp = yield postText(parts1.stage1, headers, "", 10000);
+    if (!stage1Resp) throw new Error("stage 1 post failed");
+
+    // Stage 2: Obtain server list and stream endpoints
+    var parts = yield encdec("enc-" + site.key + "?text=" + encodeURIComponent(stage1Resp) + "&stage=2");
+    if (!parts || !parts.servers || !parts.stream) throw new Error("stage 2 failed");
+    if (parts.token) headers["X-CSRF-Token"] = parts.token;
+
+    var serverList = yield postText(parts.servers, headers, "", 10000);
     var servers = (yield encdec("dec-" + site.key, { text: serverList })) || [];
     yield pickFromServers(keep, site.name, servers, function (server) {
       return __async(function* () {
-        var sealed = yield postText(parts.stream + "/" + server.data, headers, undefined, 10000);
+        var sealed = yield postText(parts.stream + "/" + server.data, headers, "", 10000);
         var stream = yield encdec("dec-" + site.key, { text: sealed });
         if (!stream || !stream.url) return null;
         var playHeaders = stream.noReferrer ? { "User-Agent": UA } : { "User-Agent": UA, "Referer": site.origin + "/", "Origin": site.origin };
