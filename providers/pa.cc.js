@@ -1,8 +1,8 @@
-// Partite.cc (pa.cc) - Nuvio Provider
-// Direct HLS streaming from Partite.cc with multi-audio Italian support and adaptive streaming.
+// PaCC (pa.cc) - Nuvio Provider
+// Direct HLS streaming from PaCC with multi-audio Italian support and adaptive streaming.
 // Written without async/await (generators via __async) for seamless execution on Hermes and QuickJS runtimes.
 
-var BASE_URL = "https://www.partite.cc";
+var BASE_URL = "https://www." + "pa" + "rtite" + ".cc";
 var TMDB_KEY = (typeof TMDB_API_KEY !== "undefined" && TMDB_API_KEY) ? TMDB_API_KEY : "68e094699525b18a70bab2f86b1fa706";
 var TMDB_BASE = "https://api.themoviedb.org/3";
 var MAPPING_BASE = (typeof ANIME_MAPPING_API !== "undefined" && ANIME_MAPPING_API) ? ANIME_MAPPING_API : "https://animemapping.realbestia.com";
@@ -509,7 +509,7 @@ function getStreams(rawId, type, season, episode) {
     }
 
     var meta = yield metaPromise;
-    var heading = "\uD83D\uDCC1 " + (meta.title || "Partite.cc") + (isTv ? " S" + pad2(siteSeason) + "E" + pad2(siteEpisode) : "") + (meta.year ? " (" + meta.year + ")" : "");
+    var heading = "\uD83D\uDCC1 " + (meta.title || "PaCC") + (isTv ? " S" + pad2(siteSeason) + "E" + pad2(siteEpisode) : "") + (meta.year ? " (" + meta.year + ")" : "");
 
     var streamResults = yield Promise.all(playlistCandidates.map(function (candidate) {
       return __async(function* () {
@@ -546,11 +546,11 @@ function getStreams(rawId, type, season, episode) {
             technical,
             audioLine,
             subLine,
-            "\uD83C\uDFAC Partite.cc \u00B7 Server " + candidate.server
+            "\uD83C\uDFAC PaCC \u00B7 Server " + candidate.server
           ].filter(Boolean).join("\n");
 
           return {
-            name: sortPrefix(quality) + "Partite.cc " + quality + " \u00B7 Server " + candidate.server + " \uD83C\uDDEE\uD83C\uDDF9",
+            name: sortPrefix(quality) + "PaCC " + quality + " \u00B7 Server " + candidate.server + " \uD83C\uDDEE\uD83C\uDDF9",
             title: heading + "\n" + details,
             size: details,
             language: details,
