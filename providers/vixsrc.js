@@ -180,9 +180,16 @@ function resolveMediaIds(rawId, isTv) {
   var isNum = /^\d+$/.test(raw);
   var imdbMatch = (raw.match(/tt\d+/) || [])[0];
 
+  var fallback = {
+    tmdbId: isNum ? raw : null,
+    imdbId: imdbMatch || null,
+    title: "",
+    year: ""
+  };
+
   if (isNum) {
     var url = TMDB_BASE + "/" + (isTv ? "tv" : "movie") + "/" + raw + "?api_key=" + TMDB_KEY + (isTv ? "&append_to_response=external_ids" : "");
-    return getJson(url, {}, 10000).then(function (d) {
+    return getJson(url, {}, 5000).then(function (d) {
       var imdbId = (d && (d.imdb_id || (d.external_ids && d.external_ids.imdb_id))) || null;
       return {
         tmdbId: raw,
@@ -191,12 +198,12 @@ function resolveMediaIds(rawId, isTv) {
         year: ((isTv ? d.first_air_date : d.release_date) || "").slice(0, 4)
       };
     }).catch(function () {
-      return { tmdbId: raw, imdbId: null, title: "", year: "" };
+      return fallback;
     });
   }
 
   if (imdbMatch) {
-    return getJson(TMDB_BASE + "/find/" + imdbMatch + "?api_key=" + TMDB_KEY + "&external_source=imdb_id", {}, 10000).then(function (d) {
+    return getJson(TMDB_BASE + "/find/" + imdbMatch + "?api_key=" + TMDB_KEY + "&external_source=imdb_id", {}, 5000).then(function (d) {
       var list = (isTv ? d.tv_results : d.movie_results) || [];
       var first = list.length ? list[0] : null;
       var tmdbId = first ? String(first.id) : null;
@@ -209,11 +216,11 @@ function resolveMediaIds(rawId, isTv) {
         year: year
       };
     }).catch(function () {
-      return { tmdbId: null, imdbId: imdbMatch, title: "", year: "" };
+      return fallback;
     });
   }
 
-  return Promise.resolve({ tmdbId: null, imdbId: null, title: "", year: "" });
+  return Promise.resolve(fallback);
 }
 
 // ---------------------------------------------------------------- VixSrc Engine
@@ -229,7 +236,8 @@ function lookupVixBase() {
 }
 
 function getVixPayload(base, apiPath) {
-  return getJson(base + apiPath + "?lang=it", {
+  var sep = apiPath.indexOf("?") >= 0 ? "&" : "?";
+  return getJson(base + apiPath + sep + "lang=it&_=" + Date.now(), {
     "User-Agent": VIX_UA,
     "Referer": base + "/",
     "Accept": "application/json",
@@ -238,10 +246,83 @@ function getVixPayload(base, apiPath) {
 }
 
 function absUrl(uri, base) {
+  if (!uri) return "";
   if (/^https?:\/\//i.test(uri)) return uri;
   var origin = (base.match(/^https?:\/\/[^\/]+/i) || [""])[0];
   if (uri.charAt(0) === "/") return origin + uri;
   return base.split("?")[0].replace(/[^\/]*$/, "") + uri;
+}
+
+function objectAt(source, start) {
+  var depth = 0;
+  var quote = "";
+  for (var i = start; i < source.length; i++) {
+    var char = source[i];
+    if (quote) {
+      if (char === "\\") i++;
+      else if (char === quote) quote = "";
+    } else if (char === '"' || char === "'") {
+      quote = char;
+    } else if (source.slice(i, i + 2) === "//") {
+      var end = source.indexOf("\n", i + 2);
+      if (end === -1) break;
+      i = end;
+    } else if (source.slice(i, i + 2) === "/*") {
+      var end = source.indexOf("*/", i + 2);
+      if (end === -1) break;
+      i = end + 1;
+    } else if (char === "{") {
+      depth++;
+    } else if (char === "}" && --depth === 0) {
+      return source.slice(start, i + 1);
+    }
+  }
+  throw new Error("Incomplete VixSrc player configuration");
+}
+
+function decodeString(value) {
+  return value.slice(1, -1).replace(/\\(?:u([\da-f]{4})|x([\da-f]{2})|([\s\S]))/gi, function (match, unicode, hex, char) {
+    if (unicode || hex) return String.fromCharCode(parseInt(unicode || hex, 16));
+    var escapes = { n: "\n", r: "\r", t: "\t", b: "\b", f: "\f" };
+    return Object.prototype.hasOwnProperty.call(escapes, char) ? escapes[char] : char;
+  });
+}
+
+function readLiterals(source) {
+  var values = Object.create(null);
+  var pattern = /(?:"(\w+)"|'(\w+)'|\b(\w+))\s*:\s*("(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'|\d+)/g;
+  var match;
+  while ((match = pattern.exec(source)) !== null) {
+    var raw = match[4];
+    values[match[1] || match[2] || match[3]] = /^['"]/.test(raw) ? decodeString(raw) : raw;
+  }
+  return values;
+}
+
+function extractPlaylist(html, base) {
+  var assignment = /\bwindow\.masterPlaylist\s*=\s*\{/.exec(html);
+  if (!assignment) throw new Error("VixSrc player has no master playlist");
+  var master = objectAt(html, assignment.index + assignment[0].length - 1);
+  var paramsMatch = /(?:\bparams|"params"|'params')\s*:\s*\{/.exec(master);
+  if (!paramsMatch) throw new Error("VixSrc player has no playlist parameters");
+  var paramsBlock = objectAt(master, paramsMatch.index + paramsMatch[0].length - 1);
+  var params = readLiterals(paramsBlock);
+  var fields = readLiterals(master.replace(paramsBlock, "{}"));
+  if (!fields.url || !params.token || !/^\d+$/.test(params.expires || "")) {
+    throw new Error("VixSrc player has incomplete playlist credentials");
+  }
+
+  var basePl = absUrl(fields.url, base).split("#")[0];
+  var queryStart = basePl.indexOf("?");
+  var path = queryStart === -1 ? basePl : basePl.slice(0, queryStart);
+  var query = queryStart === -1 ? [] : basePl.slice(queryStart + 1).split("&").filter(Boolean);
+  if (!/\.m3u8$/i.test(path)) path = path.replace(/\/$/, "") + ".m3u8";
+  if (/\bwindow\.canPlayFHD\s*=\s*true\b/.test(html) || /\bcanPlayFHD\s*=\s*true\b/.test(html)) params.h = "1";
+
+  var keys = Object.keys(params).filter(function (key) { return params[key] !== ""; });
+  var retained = query.filter(function (part) { return keys.indexOf(decodeURIComponent(part.split("=")[0])) === -1; });
+  var signed = keys.map(function (key) { return encodeURIComponent(key) + "=" + encodeURIComponent(params[key]); });
+  return path + "?" + retained.concat(signed).join("&");
 }
 
 function attributes(line) {
@@ -300,8 +381,7 @@ function buildInlineVariantUri(variant, commonTags, base) {
   lines.push(variant.line);
   lines.push(variant.url);
   var text = lines.join("\n") + "\n";
-  if (text.length % 3 === 0) text += "\n";
-  return "data://application/m3u8/;base64," + asciiToBase64(text) + "#.m3u8";
+  return "data:application/vnd.apple.mpegurl;name=vixsrc.m3u8-inline;base64," + asciiToBase64(text);
 }
 
 // ---------------------------------------------------------------- Entry point
@@ -313,7 +393,18 @@ function getStreams(tmdbId, mediaType, season, episode) {
   return __async(function* () {
     var meta = yield resolveMediaIds(tmdbId, isTv);
     var candidateIds = [];
-    if (meta.imdbId) candidateIds.push(meta.imdbId);
+
+    var rawClean = String(tmdbId || "").trim().replace(/^tmdb:/i, "");
+    var isNum = /^\d+$/.test(rawClean);
+    var imdbMatch = (rawClean.match(/tt\d+/) || [])[0];
+
+    // Priority 1: ID explicitly provided by caller
+    if (isNum) candidateIds.push(rawClean);
+    else if (imdbMatch) candidateIds.push(imdbMatch);
+    else if (rawClean) candidateIds.push(rawClean);
+
+    // Priority 2: Alternative converted ID
+    if (meta.imdbId && candidateIds.indexOf(meta.imdbId) === -1) candidateIds.push(meta.imdbId);
     if (meta.tmdbId && candidateIds.indexOf(meta.tmdbId) === -1) candidateIds.push(meta.tmdbId);
 
     if (!candidateIds.length) {
@@ -351,22 +442,69 @@ function getStreams(tmdbId, mediaType, season, episode) {
 
     var embedUrl = absUrl(String(payload.src), base + "/");
     var html = yield getText(embedUrl, { "User-Agent": VIX_UA, "Referer": base + "/" }, REQUEST_TIMEOUT_MS);
-    var token = (html.match(/'token'\s*:\s*'([^']+)'/) || [])[1];
-    var expires = (html.match(/'expires'\s*:\s*'([^']+)'/) || [])[1];
-    var playlist = (html.match(/url\s*:\s*'([^']+\/playlist\/\d+[^']*)'/) || [])[1];
-    if (!token || !expires || !playlist) {
-      console.warn("[VixSrc] incomplete playlist credentials in embed page");
+
+    var masterUrl = null;
+    try {
+      masterUrl = extractPlaylist(html, base);
+    } catch (parseErr) {
+      console.warn("[VixSrc] extractPlaylist notice: " + parseErr.message);
+    }
+
+    if (!masterUrl) {
+      var tokenM = html.match(/[\x27\x22]token[\x27\x22]\s*:\s*[\x27\x22]([^\x27\x22]+)/);
+      var expiresM = html.match(/[\x27\x22]expires[\x27\x22]\s*:\s*[\x27\x22]?(\d+)/);
+      var urlM = html.match(/[\x27\x22]?url[\x27\x22]?\s*:\s*[\x27\x22]([^\x27\x22]+)/);
+      if (tokenM && expiresM && urlM) {
+        var pUrl = urlM[1].replace(/\\\//g, "/");
+        if (!/\.m3u8$/i.test(pUrl.split("?")[0])) {
+          var qIdx = pUrl.indexOf("?");
+          pUrl = (qIdx >= 0 ? pUrl.slice(0, qIdx) + ".m3u8" + pUrl.slice(qIdx) : pUrl + ".m3u8");
+        }
+        var sep = pUrl.indexOf("?") >= 0 ? "&" : "?";
+        var fhd = /canPlayFHD\s*=\s*true/i.test(html) || /[?&]canPlayFHD=1/.test(embedUrl);
+        masterUrl = pUrl + sep + "token=" + encodeURIComponent(tokenM[1]) + "&expires=" + encodeURIComponent(expiresM[1]) + (fhd ? "&h=1" : "");
+      }
+    }
+
+    if (!masterUrl) {
+      console.warn("[VixSrc] Could not extract playlist URL from embed");
       return [];
     }
 
-    var fhd = /window\.canPlayFHD\s*=\s*true/.test(html) || /[?&]canPlayFHD=1/.test(embedUrl);
-    var masterUrl = playlist + (playlist.indexOf("?") >= 0 ? "&" : "?") + "token=" + encodeURIComponent(token) +
-      "&expires=" + encodeURIComponent(expires) + (fhd ? "&h=1" : "") + "&b=1&lang=it";
+    var playHeaders = {
+      "User-Agent": VIX_UA,
+      "Referer": base + "/",
+      "Origin": base
+    };
 
-    var playHeaders = { "User-Agent": VIX_UA, "Referer": embedUrl, "Origin": base };
-    var masterContent = yield getText(masterUrl, playHeaders, REQUEST_TIMEOUT_MS);
-    if (!masterContent.trim().startsWith("#EXTM3U")) {
-      throw new Error("Invalid HLS master playlist returned from VixSrc");
+    var heading = "\uD83D\uDCC1 " + (meta.title || "VixSrc") + (isTv ? " S" + pad2(season) + "E" + pad2(episode) : "") + (meta.year ? " (" + meta.year + ")" : "");
+
+    var masterContent = "";
+    try {
+      masterContent = yield getText(masterUrl, playHeaders, REQUEST_TIMEOUT_MS);
+    } catch (netErr) {
+      console.warn("[VixSrc] Master playlist request failed: " + netErr.message);
+    }
+
+    if (!masterContent || !masterContent.trim().startsWith("#EXTM3U")) {
+      console.log("[VixSrc] Fallback to direct master playlist for " + (meta.title || tmdbId));
+      return [{
+        name: sortPrefix(1080, 0) + "VixSrc Auto \uD83C\uDDEE\uD83C\uDDF9",
+        title: heading + "\n\uD83C\uDF9B\uFE0F Auto quality \u00B7 \uD83D\uDD0A Multi-audio\n\uD83C\uDFAC VixSrc \u00B7 HLS \u00B7 \uD83C\uDDEE\uD83C\uDDF9",
+        size: "\uD83C\uDF9B\uFE0F Auto quality \u00B7 \uD83D\uDD0A Multi-audio",
+        language: "\uD83C\uDF9B\uFE0F Auto quality \u00B7 \uD83D\uDD0A Multi-audio",
+        url: masterUrl,
+        quality: "Auto",
+        type: "hls",
+        provider: "vixsrc",
+        headers: playHeaders,
+        behaviorHints: {
+          notWebReady: true,
+          headers: playHeaders,
+          proxyHeaders: { request: playHeaders },
+          filename: "vixsrc-auto.m3u8"
+        }
+      }];
     }
 
     // Parse variants & media tags
@@ -421,7 +559,6 @@ function getStreams(tmdbId, mediaType, season, episode) {
       }
     });
 
-    var heading = "\uD83D\uDCC1 " + (meta.title || "VixSrc") + (isTv ? " S" + pad2(season) + "E" + pad2(episode) : "") + (meta.year ? " (" + meta.year + ")" : "");
     var audioLine = audioTracks.length ? "\uD83D\uDD0A " + audioTracks.join(" ") : "\uD83D\uDD0A \uD83C\uDDEE\uD83C\uDDF9 Italiano";
     var subLine = subtitleSummary(subTracks);
 
@@ -438,10 +575,11 @@ function getStreams(tmdbId, mediaType, season, episode) {
 
     // If no variants were parsed, provide the master stream directly
     if (!uniqueVariants.length) {
+      var fhdFlag = /window\.canPlayFHD\s*=\s*true/.test(html) || /[?&]canPlayFHD=1/.test(embedUrl);
       uniqueVariants.push({
-        height: fhd ? 1080 : 720,
-        width: fhd ? 1920 : 1280,
-        quality: fhd ? "1080p" : "720p",
+        height: fhdFlag ? 1080 : 720,
+        width: fhdFlag ? 1920 : 1280,
+        quality: fhdFlag ? "1080p" : "720p",
         line: "#EXT-X-STREAM-INF:BANDWIDTH=6000000",
         url: masterUrl,
         attrs: {}
@@ -478,6 +616,9 @@ function getStreams(tmdbId, mediaType, season, episode) {
           return { url: s.uri, name: s.name, language: s.lang };
         }),
         behaviorHints: {
+          notWebReady: true,
+          headers: playHeaders,
+          proxyHeaders: { request: playHeaders },
           filename: "vixsrc-" + v.quality + ".m3u8"
         }
       };
