@@ -173,29 +173,47 @@ function asciiToBase64(str) {
   return bytesToBase64(bytes);
 }
 
-// ---------------------------------------------------------------- TMDB
+// ---------------------------------------------------------------- TMDB & ID Resolution
 
-function resolveTmdbId(rawId, isTv) {
-  var id = String(rawId || "").trim().replace(/^tmdb:/i, "");
-  if (/^\d+$/.test(id)) return Promise.resolve(id);
-  var imdb = (id.match(/tt\d+/) || [])[0];
-  if (!imdb) return Promise.resolve(null);
-  return getJson(TMDB_BASE + "/find/" + imdb + "?api_key=" + TMDB_KEY + "&external_source=imdb_id", {}, 10000).then(function (d) {
-    var list = (isTv ? d.tv_results : d.movie_results) || [];
-    return list.length ? String(list[0].id) : null;
-  }).catch(function () { return null; });
-}
+function resolveMediaIds(rawId, isTv) {
+  var raw = String(rawId || "").trim().replace(/^tmdb:/i, "");
+  var isNum = /^\d+$/.test(raw);
+  var imdbMatch = (raw.match(/tt\d+/) || [])[0];
 
-function tmdbMeta(tmdbId, isTv) {
-  var url = TMDB_BASE + "/" + (isTv ? "tv" : "movie") + "/" + tmdbId + "?api_key=" + TMDB_KEY;
-  return getJson(url, {}, 10000).then(function (d) {
-    return {
-      title: (isTv ? d.name : d.title) || "",
-      year: ((isTv ? d.first_air_date : d.release_date) || "").slice(0, 4)
-    };
-  }).catch(function () {
-    return { title: "", year: "" };
-  });
+  if (isNum) {
+    var url = TMDB_BASE + "/" + (isTv ? "tv" : "movie") + "/" + raw + "?api_key=" + TMDB_KEY + (isTv ? "&append_to_response=external_ids" : "");
+    return getJson(url, {}, 10000).then(function (d) {
+      var imdbId = (d && (d.imdb_id || (d.external_ids && d.external_ids.imdb_id))) || null;
+      return {
+        tmdbId: raw,
+        imdbId: imdbId,
+        title: (isTv ? d.name : d.title) || "",
+        year: ((isTv ? d.first_air_date : d.release_date) || "").slice(0, 4)
+      };
+    }).catch(function () {
+      return { tmdbId: raw, imdbId: null, title: "", year: "" };
+    });
+  }
+
+  if (imdbMatch) {
+    return getJson(TMDB_BASE + "/find/" + imdbMatch + "?api_key=" + TMDB_KEY + "&external_source=imdb_id", {}, 10000).then(function (d) {
+      var list = (isTv ? d.tv_results : d.movie_results) || [];
+      var first = list.length ? list[0] : null;
+      var tmdbId = first ? String(first.id) : null;
+      var title = (first ? (isTv ? first.name : first.title) : "") || "";
+      var year = ((first ? (isTv ? first.first_air_date : first.release_date) : "") || "").slice(0, 4);
+      return {
+        tmdbId: tmdbId,
+        imdbId: imdbMatch,
+        title: title,
+        year: year
+      };
+    }).catch(function () {
+      return { tmdbId: null, imdbId: imdbMatch, title: "", year: "" };
+    });
+  }
+
+  return Promise.resolve({ tmdbId: null, imdbId: null, title: "", year: "" });
 }
 
 // ---------------------------------------------------------------- VixSrc Engine
@@ -293,31 +311,41 @@ function getStreams(tmdbId, mediaType, season, episode) {
   console.log("[VixSrc] getStreams id=" + tmdbId + " type=" + mediaType + " s=" + season + " e=" + episode);
 
   return __async(function* () {
-    var id = yield resolveTmdbId(tmdbId, isTv);
-    if (!id) {
+    var meta = yield resolveMediaIds(tmdbId, isTv);
+    var candidateIds = [];
+    if (meta.imdbId) candidateIds.push(meta.imdbId);
+    if (meta.tmdbId && candidateIds.indexOf(meta.tmdbId) === -1) candidateIds.push(meta.tmdbId);
+
+    if (!candidateIds.length) {
       console.warn("[VixSrc] unsupported id: " + tmdbId);
       return [];
     }
 
-    var meta = yield tmdbMeta(id, isTv);
-    var apiPath = isTv ? "/api/tv/" + id + "/" + Number(season) + "/" + Number(episode) : "/api/movie/" + id;
-
     var base = VIX_DEFAULT_BASE;
     var payload = null;
-    try {
-      payload = yield getVixPayload(base, apiPath);
-    } catch (e) {
-      var alt = yield lookupVixBase();
-      if (alt && alt !== base) {
-        base = alt;
-        try {
-          payload = yield getVixPayload(base, apiPath);
-        } catch (e2) {}
+    var lastApiPath = "";
+
+    for (var cIdx = 0; cIdx < candidateIds.length; cIdx++) {
+      var cand = candidateIds[cIdx];
+      var apiPath = isTv ? "/api/tv/" + cand + "/" + Number(season) + "/" + Number(episode) : "/api/movie/" + cand;
+      lastApiPath = apiPath;
+      try {
+        payload = yield getVixPayload(base, apiPath);
+        if (payload && payload.src) break;
+      } catch (e) {
+        var alt = yield lookupVixBase();
+        if (alt && alt !== base) {
+          base = alt;
+          try {
+            payload = yield getVixPayload(base, apiPath);
+            if (payload && payload.src) break;
+          } catch (e2) {}
+        }
       }
     }
 
     if (!payload || !payload.src) {
-      console.warn("[VixSrc] no payload src returned for " + apiPath);
+      console.warn("[VixSrc] no payload src returned for " + lastApiPath);
       return [];
     }
 
@@ -457,7 +485,7 @@ function getStreams(tmdbId, mediaType, season, episode) {
 
     // Sort by name using Nuvio alphabetical order
     streams.sort(function (a, b) { return a.name < b.name ? -1 : a.name > b.name ? 1 : 0; });
-    console.log("[VixSrc] Composed " + streams.length + " stream(s) for " + (meta.title || id));
+    console.log("[VixSrc] Composed " + streams.length + " stream(s) for " + (meta.title || tmdbId));
     return streams;
   }()).catch(function (e) {
     console.error("[VixSrc] " + e.message);
@@ -467,3 +495,4 @@ function getStreams(tmdbId, mediaType, season, episode) {
 
 if (typeof module !== "undefined" && module.exports) module.exports = { getStreams: getStreams };
 if (typeof globalThis !== "undefined") globalThis.getStreams = getStreams;
+if (typeof global !== "undefined") global.getStreams = getStreams;

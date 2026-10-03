@@ -1,6 +1,6 @@
 {
   "name": "PriSynx",
-  "version": "1.1.3",
+  "version": "1.1.4",
   "description": "Video da fonti internazionali con sync audio italiano",
   "author": "local",
   "scrapers": [
@@ -66,7 +66,7 @@
       "id": "vixsrc",
       "name": "VixSrc",
       "description": "Film e Serie TV da VixSrc in HD/FHD con audio e sottotitoli italiani",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "resources": ["stream"],
       "idPrefixes": ["tmdb:", "tt"],
       "supportedTypes": ["movie", "series", "tv"],
@@ -92,7 +92,7 @@
       "id": "animeunity",
       "name": "AnimeUnity",
       "description": "Anime in streaming ITA e SUB-ITA da AnimeUnity in HLS (VixCloud)",
-      "version": "1.0.1",
+      "version": "1.0.2",
       "resources": ["stream"],
       "idPrefixes": ["kitsu:", "mal:", "anilist:", "anidb:", "tmdb:", "tt"],
       "supportedTypes": ["movie", "series", "tv", "anime"],

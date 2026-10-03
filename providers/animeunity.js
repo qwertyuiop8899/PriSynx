@@ -156,7 +156,7 @@ function parseRequest(rawId, mediaType, reqSeason, reqEpisode) {
   var id = String(rawId || "").trim();
   var season = reqSeason !== undefined && reqSeason !== null && !isNaN(Number(reqSeason)) ? Number(reqSeason) : null;
   var episode = reqEpisode !== undefined && reqEpisode !== null && !isNaN(Number(reqEpisode)) ? Number(reqEpisode) : null;
-  var provider = "kitsu";
+  var provider = "tmdb";
   var extId = id;
 
   var mKitsu = id.match(/^(kitsu|mal|anilist|anidb):(\d+)(?::(\d+))?(?::(\d+))?$/i);
@@ -183,7 +183,7 @@ function parseRequest(rawId, mediaType, reqSeason, reqEpisode) {
     } else {
       var mTmdb = id.match(/^(?:tmdb:)?(\d+)(?::(\d+))?(?::(\d+))?$/i);
       if (mTmdb) {
-        provider = id.toLowerCase().indexOf("tmdb:") === 0 ? "tmdb" : "auto";
+        provider = "tmdb";
         extId = mTmdb[1];
         if (mTmdb[3]) {
           season = Number(mTmdb[2]);
@@ -210,28 +210,24 @@ function parseRequest(rawId, mediaType, reqSeason, reqEpisode) {
 
 // ---------------------------------------------------------------- Mapping Service
 
-function fetchMappingPayload(provider, extId, season, episode) {
+function fetchMappingPayload(provider, extId, season, episode, noFallback) {
   return __async(function* () {
     var queryParams = "?ep=" + episode + "&lang=it";
     if (season !== null && season !== undefined) queryParams += "&s=" + season;
 
-    var providersToTry = provider === "auto" ? ["kitsu", "tmdb"] : [provider];
+    for (var bIdx = 0; bIdx < MAPPING_BASES.length; bIdx++) {
+      var base = MAPPING_BASES[bIdx];
+      var url = base + "/" + provider + "/" + encodeURIComponent(extId) + queryParams;
 
-    for (var pIdx = 0; pIdx < providersToTry.length; pIdx++) {
-      var currentProv = providersToTry[pIdx];
-
-      for (var bIdx = 0; bIdx < MAPPING_BASES.length; bIdx++) {
-        var base = MAPPING_BASES[bIdx];
-        var url = base + "/" + currentProv + "/" + encodeURIComponent(extId) + queryParams;
-
-        try {
-          var payload = yield getJson(url, { "User-Agent": DEFAULT_UA, "Accept": "application/json" }, 5000);
-          if (payload && payload.ok && payload.mappings && payload.mappings.animeunity) {
-            return payload;
-          }
-        } catch (_) {}
-      }
+      try {
+        var payload = yield getJson(url, { "User-Agent": DEFAULT_UA, "Accept": "application/json" }, 5000);
+        if (payload && payload.ok && payload.mappings && payload.mappings.animeunity) {
+          return payload;
+        }
+      } catch (_) {}
     }
+
+    if (noFallback) return null;
 
     // If IMDb provided and no paths found, attempt TMDB ID discovery
     if (provider === "imdb" && /^tt\d+$/.test(extId)) {
@@ -241,20 +237,20 @@ function fetchMappingPayload(provider, extId, season, episode) {
         var results = (tmdbData && (tmdbData.tv_results || tmdbData.movie_results)) || [];
         if (results.length > 0 && results[0].id) {
           var tmdbId = String(results[0].id);
-          var m = yield fetchMappingPayload("tmdb", tmdbId, season, episode);
+          var m = yield fetchMappingPayload("tmdb", tmdbId, season, episode, true);
           if (m) return m;
         }
       } catch (_) {}
     }
 
     // If TMDB provided and no paths found, attempt IMDb ID discovery via TMDB
-    if ((provider === "tmdb" || provider === "auto") && /^\d+$/.test(extId)) {
+    if (provider === "tmdb" && /^\d+$/.test(extId)) {
       try {
         var movieUrl = TMDB_BASE + "/movie/" + extId + "?api_key=" + TMDB_KEY;
         var movieData = yield getJson(movieUrl, {}, 4000);
         var imdbId = movieData && movieData.imdb_id;
         if (imdbId && /^tt\d+$/.test(imdbId)) {
-          var mMovie = yield fetchMappingPayload("imdb", imdbId, season, episode);
+          var mMovie = yield fetchMappingPayload("imdb", imdbId, season, episode, true);
           if (mMovie) return mMovie;
         }
       } catch (_) {}
@@ -264,7 +260,7 @@ function fetchMappingPayload(provider, extId, season, episode) {
         var tvData = yield getJson(tvUrl, {}, 4000);
         var tvImdbId = tvData && tvData.imdb_id;
         if (tvImdbId && /^tt\d+$/.test(tvImdbId)) {
-          var mTv = yield fetchMappingPayload("imdb", tvImdbId, season, episode);
+          var mTv = yield fetchMappingPayload("imdb", tvImdbId, season, episode, true);
           if (mTv) return mTv;
         }
       } catch (_) {}
