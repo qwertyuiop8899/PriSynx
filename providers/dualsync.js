@@ -518,14 +518,18 @@ function getItalianTracks(tmdbId, isTv, season, episode) {
     var playHeaders = { "User-Agent": VIX_UA, "Referer": embedUrl, "Origin": base };
     var master = yield getText(masterUrl, playHeaders, 12000);
 
-    var audio = null, subtitles = [];
+    var audio = null, engAudio = null, subtitles = [];
     master.split(/\r?\n/).forEach(function (line) {
       if (line.indexOf("#EXT-X-MEDIA:") !== 0 || !attr(line, "URI")) return;
       var type = attr(line, "TYPE");
       var lang = String(attr(line, "LANGUAGE") || "").toLowerCase();
       var name = String(attr(line, "NAME") || "");
-      if (type === "AUDIO" && !audio && (lang === "ita" || lang === "it" || /^ita/i.test(name))) {
-        audio = { uri: absUrl(attr(line, "URI"), masterUrl) };
+      if (type === "AUDIO") {
+        if (!audio && (lang === "ita" || lang === "it" || /^ita/i.test(name))) {
+          audio = { uri: absUrl(attr(line, "URI"), masterUrl) };
+        } else if (!engAudio && (lang === "eng" || lang === "en" || /^eng/i.test(name) || /english/i.test(name))) {
+          engAudio = { uri: absUrl(attr(line, "URI"), masterUrl) };
+        }
       } else if (type === "SUBTITLES") {
         var subUri = absUrl(attr(line, "URI"), masterUrl);
         var forced = /forced/i.test(name + " " + lang) || attr(line, "FORCED") === "YES";
@@ -533,7 +537,7 @@ function getItalianTracks(tmdbId, isTv, season, episode) {
         subtitles.push({ uri: subUri, name: name || "Italiano", lang: lang || "ita", forced: forced });
       }
     });
-    return audio ? { audio: audio, subtitles: subtitles, headers: playHeaders } : null;
+    return audio ? { audio: audio, engAudio: engAudio, subtitles: subtitles, headers: playHeaders } : null;
   }());
 }
 
@@ -812,8 +816,15 @@ function getStreams(tmdbId, mediaType, season, episode) {
         return it.renditions.length > 0 && it.video_duration >= 30;
       });
       if (autoItems.length) {
+        var tracks = [
+          { lang: "ita", base_url: ita.audio.uri, headers: ita.headers || {}, source: "vixsrc" }
+        ];
+        if (ita.engAudio && ita.engAudio.uri) {
+          tracks.push({ lang: "eng", base_url: ita.engAudio.uri, headers: ita.headers || {}, source: "vixsrc" });
+        }
         reportUnmeasuredToAutoSync({
           media_key: mediaKey,
+          audio_tracks: tracks,
           audio: {
             source: "vixsrc",
             base_url: ita.audio.uri,
