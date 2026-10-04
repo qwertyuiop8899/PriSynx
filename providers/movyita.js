@@ -126,20 +126,21 @@ function reportUnmeasuredToAutoSync(payload) {
   } catch (e) {}
 }
 
-function getAutoSyncJobStatus(mediaKey) {
-  if (!AUTOSYNC_API_URL || !mediaKey) return Promise.resolve(null);
+function getAutoSyncJobs(mediaKey) {
+  if (!AUTOSYNC_API_URL || !mediaKey) return Promise.resolve({ status: null, done: null });
   var url = AUTOSYNC_API_URL.replace(/\/jobs\/?$/, "/jobs/status") + "?media_key=" + encodeURIComponent(mediaKey);
   return getJson(url, { "Accept": "application/json" }, 2500).then(function (d) {
-    if (!d || !d.items || !d.items.length) return null;
+    if (!d || !d.items || !d.items.length) return { status: null, done: null };
+    var done = d.items.filter(function (it) { return it.status === "done" && it.result && it.result.status === "ok"; })[0] || null;
     var running = d.items.some(function (it) { return it.status === "running"; });
-    if (running) return "running";
+    if (running) return { status: "running", done: done };
     var queued = d.items.some(function (it) { return it.status === "queued"; });
-    if (queued) return "queued";
+    if (queued) return { status: "queued", done: done };
     var incompatible = d.items.some(function (it) { return it.status === "incompatible"; });
-    if (incompatible) return "incompatible";
-    return null;
+    if (incompatible) return { status: "incompatible", done: done };
+    return { status: null, done: done };
   }).catch(function () {
-    return null;
+    return { status: null, done: null };
   });
 }
 
@@ -588,21 +589,7 @@ function getSyncStatus(meta, isTv, season, episode) {
     "&type=" + (isTv ? "series" : "movie") + "&season=" + (isTv ? Number(season) : 0) +
     "&episode=" + (isTv ? Number(episode) : 0) + "&provider=movy&audio_source=vixsrc";
   return getJson(url, { "Accept": "application/json" }, 8000).then(function (d) {
-    if (d && d.found) {
-      if (d.status === "incompatible") {
-        return getAutoSyncJobStatus(mediaKey).then(function (jobStatus) {
-          if (jobStatus === "running") {
-            return { level: "yellow", jobStatus: "running", reason: "calcolo in corso", tag: "in calcolo" };
-          }
-          if (jobStatus === "queued") {
-            return { level: "yellow", jobStatus: "queued", reason: "in coda", tag: "in coda" };
-          }
-          if (jobStatus === "incompatible") {
-            return { level: "red", reason: "versioni audio/video diverse", tag: "versioni diverse" };
-          }
-          return { level: "yellow", jobStatus: "new", reason: "incompatibilit\u00E0 da verificare", tag: "da verificare" };
-        });
-      }
+    if (d && d.found && d.status === "ok") {
       var sync = classifySync(d);
       sync.info = {
         status: d.status,
@@ -612,15 +599,25 @@ function getSyncStatus(meta, isTv, season, episode) {
       };
       return sync;
     }
-    // Not found in ToastFlix: check AutoSync job queue
-    return getAutoSyncJobStatus(mediaKey).then(function (jobStatus) {
-      if (jobStatus === "running") {
+    // Check AutoSync directly (if ToastFlix returned not found or incompatible)
+    return getAutoSyncJobs(mediaKey).then(function (aj) {
+      if (aj.done) {
+        var s = classifySync(aj.done.result);
+        s.info = {
+          status: aj.done.result.status,
+          offsetMs: aj.done.result.offset == null ? null : Math.round(Number(aj.done.result.offset) * 1000),
+          rate: Number(aj.done.result.rate || 1),
+          hasCuts: !!aj.done.result.has_cuts
+        };
+        return s;
+      }
+      if (aj.status === "running") {
         return { level: "yellow", jobStatus: "running", reason: "calcolo in corso", tag: "in calcolo" };
       }
-      if (jobStatus === "queued") {
+      if (aj.status === "queued") {
         return { level: "yellow", jobStatus: "queued", reason: "in coda", tag: "in coda" };
       }
-      if (jobStatus === "incompatible") {
+      if (aj.status === "incompatible" || (d && d.status === "incompatible")) {
         return { level: "red", reason: "versioni audio/video diverse", tag: "versioni diverse" };
       }
       return { level: "yellow", jobStatus: "new", reason: "offset da misurare", tag: "da misurare" };

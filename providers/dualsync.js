@@ -131,20 +131,32 @@ function reportUnmeasuredToAutoSync(payload) {
   } catch (e) {}
 }
 
-function getAutoSyncJobStatus(mediaKey) {
-  if (!AUTOSYNC_API_URL || !mediaKey) return Promise.resolve(null);
+function getAutoSyncJobs(mediaKey) {
+  if (!AUTOSYNC_API_URL || !mediaKey) return Promise.resolve({ status: null, measured: [] });
   var url = AUTOSYNC_API_URL.replace(/\/jobs\/?$/, "/jobs/status") + "?media_key=" + encodeURIComponent(mediaKey);
   return getJson(url, { "Accept": "application/json" }, 2500).then(function (d) {
-    if (!d || !d.items || !d.items.length) return null;
+    if (!d || !d.items || !d.items.length) return { status: null, measured: [] };
     var running = d.items.some(function (it) { return it.status === "running"; });
-    if (running) return "running";
     var queued = d.items.some(function (it) { return it.status === "queued"; });
-    if (queued) return "queued";
     var incompatible = d.items.some(function (it) { return it.status === "incompatible"; });
-    if (incompatible) return "incompatible";
-    return null;
+    var status = running ? "running" : (queued ? "queued" : (incompatible ? "incompatible" : null));
+    var measured = [];
+    d.items.forEach(function (it) {
+      if (it.status === "done" && it.result && it.result.status === "ok") {
+        measured.push({
+          provider: it.provider,
+          resolution: (it.result.renditions && it.result.renditions[0]) ? it.result.renditions[0].resolution : 1080,
+          status: "ok",
+          offset: it.result.offset,
+          rate: it.result.rate || 1.0,
+          has_cuts: !!it.result.has_cuts,
+          video_duration: it.video_duration
+        });
+      }
+    });
+    return { status: status, measured: measured };
   }).catch(function () {
-    return null;
+    return { status: null, measured: [] };
   });
 }
 
@@ -753,9 +765,18 @@ function getStreams(tmdbId, mediaType, season, episode) {
       }),
       getMeasuredRenditions(meta, isTv, season, episode),
       collectEncodes(ctx),
-      getAutoSyncJobStatus(mediaKey)
+      getAutoSyncJobs(mediaKey)
     ]);
-    var ita = results[0], measured = results[1], encodes = results[2], autoJobStatus = results[3];
+    var ita = results[0], measured = results[1] || [], encodes = results[2], autoJobs = results[3];
+    var autoJobStatus = autoJobs.status;
+    if (autoJobs.measured && autoJobs.measured.length) {
+      autoJobs.measured.forEach(function (am) {
+        var exists = measured.some(function (m) {
+          return Math.abs(Number(m.video_duration) - am.video_duration) <= DB_LENGTH_TOLERANCE_S;
+        });
+        if (!exists) measured.push(am);
+      });
+    }
     if (!encodes.length) {
       console.warn("[DualSync] no 4K/FHD video for " + meta.title);
       return [];
