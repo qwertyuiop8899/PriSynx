@@ -33,7 +33,7 @@ var NUVIO_DELAY_STEP_MS = 25;
 var AUTO_DELAY_MAX_MS = 60000;
 var NUVIO_MAX_DELAY_MS = AUTO_DELAY_MAX_MS;
 
-var AUTOSYNC_API_URL = "http://92.4.161.181:8095/plugin/jobs";
+var AUTOSYNC_API_URL = "https://autosync.stremio-italia.eu/plugin/jobs";
 var PRISYNX_SECRET = "prisynx-hmac-secure-2026";
 // Frame-rate pairs behind typical release speed changes (NTSC 1000/1001, PAL 25).
 var FPS_PAIRS = [[23.976, 24], [24, 25], [23.976, 25]];
