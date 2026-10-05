@@ -24,8 +24,8 @@ var VIX_DEFAULT_BASE = "https://vixsrc.to";
 var VIX_UA = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36";
 
 var TOASTFLIX_URL = "https://toastflix.stremio-italia.eu";
-// Lip-sync becomes noticeable around 45 ms early / 125 ms late (ITU-R BT.1359); 100 ms is a safe "in sync" band.
-var SYNC_OK_SECONDS = 0.1;
+// Audio delay step in NuvioTV is 25 ms. Offsets <= 25 ms are imperceptible (< 1 video frame at 24fps) and considered in sync.
+var SYNC_OK_SECONDS = 0.025;
 // A speed mismatch below this drifts less than the sync band over a 2-hour film.
 var SYNC_RATE_TOLERANCE = SYNC_OK_SECONDS / 7200;
 // NuvioTV (>=1.1.0-beta.3) clamps the manual audio delay to ±60000 ms in 25 ms steps.
@@ -132,14 +132,24 @@ function reportUnmeasuredToAutoSync(payload) {
 }
 
 function getAutoSyncJobs(mediaKey) {
-  if (!AUTOSYNC_API_URL || !mediaKey) return Promise.resolve({ status: null, measured: [] });
+  if (!AUTOSYNC_API_URL || !mediaKey) return Promise.resolve({ status: null, stage: null, queueAhead: null, measured: [] });
   var url = AUTOSYNC_API_URL.replace(/\/jobs\/?$/, "/jobs/status") + "?media_key=" + encodeURIComponent(mediaKey);
   return getJson(url, { "Accept": "application/json" }, 2500).then(function (d) {
-    if (!d || !d.items || !d.items.length) return { status: null, measured: [] };
-    var running = d.items.some(function (it) { return it.status === "running"; });
-    var queued = d.items.some(function (it) { return it.status === "queued"; });
+    if (!d || !d.items || !d.items.length) return { status: null, stage: null, queueAhead: null, measured: [] };
+    var runningJob = d.items.filter(function (it) { return it.status === "running"; })[0] || null;
+    var queuedJob = d.items.filter(function (it) { return it.status === "queued"; })[0] || null;
     var incompatible = d.items.some(function (it) { return it.status === "incompatible"; });
-    var status = running ? "running" : (queued ? "queued" : (incompatible ? "incompatible" : null));
+    var status = runningJob ? "running" : (queuedJob ? "queued" : (incompatible ? "incompatible" : null));
+    var stage = runningJob ? (runningJob.stage || "tier1") : null;
+    var queueAhead = null;
+    if (queuedJob) {
+      queueAhead = typeof queuedJob.queue_ahead === "number" ? queuedJob.queue_ahead : 0;
+      d.items.forEach(function (it) {
+        if (it.status === "queued" && typeof it.queue_ahead === "number" && it.queue_ahead < queueAhead) {
+          queueAhead = it.queue_ahead;
+        }
+      });
+    }
     var measured = [];
     d.items.forEach(function (it) {
       if (it.status === "done" && it.result && it.result.status === "ok") {
@@ -154,9 +164,9 @@ function getAutoSyncJobs(mediaKey) {
         });
       }
     });
-    return { status: status, measured: measured };
+    return { status: status, stage: stage, queueAhead: queueAhead, measured: measured };
   }).catch(function () {
-    return { status: null, measured: [] };
+    return { status: null, stage: null, queueAhead: null, measured: [] };
   });
 }
 
@@ -651,7 +661,10 @@ function estimateSync(videoLength, itaLength) {
   return { level: "red", reason: "durata diversa di " + diffText, tag: "durata " + diffText };
 }
 
-function syncFor(enc, measured, itaLength, jobStatus) {
+function syncFor(enc, measured, itaLength, autoJobs) {
+  var jobStatus = autoJobs && autoJobs.status;
+  var jobStage = autoJobs && autoJobs.stage;
+  var queueAhead = autoJobs && autoJobs.queueAhead;
   var hit = null;
   (measured || []).forEach(function (m) {
     var d = Math.abs(Number(m.video_duration) - enc.length);
@@ -659,10 +672,26 @@ function syncFor(enc, measured, itaLength, jobStatus) {
   });
   if (hit && hit.m.status === "incompatible") {
     if (jobStatus === "running") {
-      return { level: "yellow", jobStatus: "running", tag: "in calcolo", reason: "calcolo in corso", itaLength: itaLength };
+      var isTier2 = jobStage === "tier2";
+      return {
+        level: "yellow",
+        jobStatus: "running",
+        stage: jobStage,
+        tag: isTier2 ? "analisi approfondita" : "in calcolo (~10s)",
+        reason: isTier2 ? "scansione su 7 punti in corso" : "calcolo in corso",
+        itaLength: itaLength
+      };
     }
     if (jobStatus === "queued") {
-      return { level: "yellow", jobStatus: "queued", tag: "in coda", reason: "in coda", itaLength: itaLength };
+      var qTag = (queueAhead === 0) ? "prossimo in coda" : ((queueAhead + 1) + "\u00B0 in coda");
+      return {
+        level: "yellow",
+        jobStatus: "queued",
+        queueAhead: queueAhead,
+        tag: qTag,
+        reason: "in coda",
+        itaLength: itaLength
+      };
     }
     if (jobStatus === "incompatible") {
       return { level: "red", tag: "versioni diverse", reason: "versioni audio/video diverse", itaLength: itaLength };
@@ -671,10 +700,26 @@ function syncFor(enc, measured, itaLength, jobStatus) {
   }
   if (!hit) {
     if (jobStatus === "running") {
-      return { level: "yellow", jobStatus: "running", tag: "in calcolo", reason: "calcolo in corso", itaLength: itaLength };
+      var isTier2 = jobStage === "tier2";
+      return {
+        level: "yellow",
+        jobStatus: "running",
+        stage: jobStage,
+        tag: isTier2 ? "analisi approfondita" : "in calcolo (~10s)",
+        reason: isTier2 ? "scansione su 7 punti in corso" : "calcolo in corso",
+        itaLength: itaLength
+      };
     }
     if (jobStatus === "queued") {
-      return { level: "yellow", jobStatus: "queued", tag: "in coda", reason: "in coda", itaLength: itaLength };
+      var qTag = (queueAhead === 0) ? "prossimo in coda" : ((queueAhead + 1) + "\u00B0 in coda");
+      return {
+        level: "yellow",
+        jobStatus: "queued",
+        queueAhead: queueAhead,
+        tag: qTag,
+        reason: "in coda",
+        itaLength: itaLength
+      };
     }
     if (jobStatus === "incompatible") {
       return { level: "red", tag: "versioni diverse", reason: "versioni audio/video diverse", itaLength: itaLength };
@@ -699,29 +744,54 @@ function syncFor(enc, measured, itaLength, jobStatus) {
 }
 
 // Only a constant delay can be applied automatically: same speed, no cuts, within AUTO_DELAY_MAX_MS.
+// If offset is within 25 ms (imperceptible / 0 delay step), return 0 so no unnecessary audio offset is applied.
 function autoDelayMs(info) {
   if (!info || info.status !== "ok" || info.hasCuts || info.offsetMs == null) return undefined;
   if (Math.abs(info.rate - 1) > SYNC_RATE_TOLERANCE || Math.abs(info.offsetMs) > AUTO_DELAY_MAX_MS) return undefined;
-  return info.offsetMs;
+  if (Math.abs(info.offsetMs) <= SYNC_OK_SECONDS * 1000) return 0;
+  return nuvioDelayMs(info.offsetMs / 1000);
 }
 
 function syncBadge(sync) {
   var icon = { green: "\uD83D\uDD0A\u2705", yellow: "\u23F1\uFE0F", red: "\u26D4" }[sync.level] || "\u2754";
-  if (sync.jobStatus === "running") icon = "\u2699\uFE0F";
-  else if (sync.jobStatus === "queued" || sync.jobStatus === "new") icon = "\u23F3";
+  if (sync.jobStatus === "running") {
+    icon = sync.stage === "tier2" ? "\uD83D\uDD2C" : "\u2699\uFE0F";
+  } else if (sync.jobStatus === "queued" || sync.jobStatus === "new") {
+    icon = "\u23F3";
+  }
   var short = icon + " " + sync.tag;
   if (sync.level === "green") return { short: short, line: icon + " Audio in sync" };
   if (sync.level === "yellow" && sync.delayMs !== undefined) {
     return { short: short, line: icon + " Ritardo audio " + formatDelay(sync.delayMs) + " applicato in automatico (NuvioTV); altrimenti impostalo a mano" };
   }
   if (sync.jobStatus === "running") {
-    return { short: short, line: icon + " Calcolo offset in corso su AutoSync (1-2 min)... Riapri tra poco." };
+    if (sync.stage === "tier2") {
+      return {
+        short: short,
+        line: icon + " FastPass non conclusivo: scansione approfondita su 7 punti in corso (~30s)... Riapri a breve."
+      };
+    }
+    return {
+      short: short,
+      line: icon + " AutoSync sta analizzando le tracce audio in background (~10s)... Riapri tra poco."
+    };
   }
   if (sync.jobStatus === "queued") {
-    return { short: short, line: icon + " In coda su AutoSync (calcolo a breve)... Riapri tra poco." };
+    if (sync.queueAhead === 0) {
+      return {
+        short: short,
+        line: icon + " Prossimo in coda su AutoSync (calcolo a breve)... Riapri tra poco."
+      };
+    }
+    var qAhead = typeof sync.queueAhead === "number" ? sync.queueAhead : 1;
+    var reqWord = qAhead === 1 ? "richiesta prima della tua" : "richieste prima della tua";
+    return {
+      short: short,
+      line: icon + " In coda su AutoSync (" + qAhead + " " + reqWord + ")... Riapri tra poco."
+    };
   }
   if (sync.jobStatus === "new") {
-    return { short: short, line: icon + " Misurazione offset avviata in background. Sar\u00E0 pronta alla prossima apertura." };
+    return { short: short, line: icon + " Misurazione offset avviata in background (~10s). Riapri a breve." };
   }
   if (sync.level === "yellow") return { short: short, line: icon + " Offset non misurato, da provare (" + sync.reason + ")" };
   if (sync.level === "red") return { short: short, line: icon + " Audio non in sync, non riproducibile (" + sync.reason + ")" };
@@ -850,7 +920,7 @@ function getStreams(tmdbId, mediaType, season, episode) {
     var heading = "\uD83D\uDCC1 " + meta.title + (isTv ? " S" + pad2(season) + "E" + pad2(episode) : "") + (meta.year ? " (" + meta.year + ")" : "");
     var streams = [];
     encodes.forEach(function (enc) {
-      var sync = syncFor(enc, measured, itaLength, autoJobStatus), badge = syncBadge(sync);
+      var sync = syncFor(enc, measured, itaLength, autoJobs), badge = syncBadge(sync);
       enc.qualities.forEach(function (qkey) {
         var rendition = enc.renditions[qkey];
         if (!rendition) return;
