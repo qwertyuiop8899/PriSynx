@@ -681,10 +681,10 @@ function syncFor(enc, measured, itaLength, jobStatus) {
     }
     var guess = estimateSync(enc.length, itaLength);
     guess.itaLength = itaLength;
-    if (guess.level === "yellow") {
-      guess.jobStatus = "new";
-      guess.tag = "da misurare";
-    }
+    // Never block unmeasured encodes prematurely: let AutoSync correlate intro/credits/FPS
+    guess.level = "yellow";
+    guess.jobStatus = "new";
+    guess.tag = "da misurare";
     return guess;
   }
   var sync = classifySync(hit.m);
