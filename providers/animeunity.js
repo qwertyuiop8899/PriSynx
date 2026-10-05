@@ -567,7 +567,6 @@ function getStreams(rawId, mediaType, reqSeason, reqEpisode) {
             name: sortPrefix(v.height, 0) + "AnimeUnity " + v.quality + " " + langTag,
             title: heading + "\n" + details,
             size: details,
-            language: details,
             url: v.url,
             quality: v.quality,
             type: "hls",

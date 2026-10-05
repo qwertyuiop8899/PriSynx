@@ -553,7 +553,6 @@ function getStreams(rawId, type, season, episode) {
             name: sortPrefix(quality) + "PaCC " + quality + " \u00B7 Server " + candidate.server + " \uD83C\uDDEE\uD83C\uDDF9",
             title: heading + "\n" + details,
             size: details,
-            language: details,
             quality: quality,
             type: "hls",
             url: candidate.url,
