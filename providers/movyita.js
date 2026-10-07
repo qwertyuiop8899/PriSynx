@@ -135,8 +135,9 @@ function getAutoSyncJobs(mediaKey) {
     var runningJob = d.items.filter(function (it) { return it.status === "running"; })[0] || null;
     var queuedJob = d.items.filter(function (it) { return it.status === "queued"; })[0] || null;
     var incompatible = d.items.some(function (it) { return it.status === "incompatible"; });
+    var failedJob = d.items.filter(function (it) { return it.status === "failed"; })[0] || null;
 
-    var status = runningJob ? "running" : (queuedJob ? "queued" : (incompatible ? "incompatible" : null));
+    var status = runningJob ? "running" : (queuedJob ? "queued" : (incompatible ? "incompatible" : (failedJob ? "failed" : null)));
     var stage = runningJob ? (runningJob.stage || "tier1") : null;
     var queueAhead = null;
     if (queuedJob) {
@@ -148,9 +149,26 @@ function getAutoSyncJobs(mediaKey) {
       });
     }
 
-    return { status: status, done: done, stage: stage, queueAhead: queueAhead };
+    var providerErrors = {};
+    d.items.forEach(function (it) {
+      if (it.status === "failed") {
+        var rawErr = String(it.error || it.last_error || "errore analisi");
+        var msg = rawErr;
+        if (/502/i.test(rawErr)) msg = "server offline (502 Bad Gateway)";
+        else if (/404/i.test(rawErr)) msg = "audio/video non trovato (404)";
+        else if (/403/i.test(rawErr)) msg = "accesso bloccato dal server (403)";
+        else if (/timeout/i.test(rawErr)) msg = "timeout connessione";
+        else if (/non correlabili/i.test(rawErr)) msg = "tracce non correlabili";
+        else msg = rawErr.slice(0, 60);
+        providerErrors[(it.provider || "").toLowerCase()] = msg;
+      }
+    });
+
+    var failedError = failedJob ? (providerErrors[(failedJob.provider || "").toLowerCase()] || failedJob.error || failedJob.last_error) : null;
+
+    return { status: status, done: done, stage: stage, queueAhead: queueAhead, errors: providerErrors, error: failedError };
   }).catch(function () {
-    return { status: null, done: null, stage: null, queueAhead: null };
+    return { status: null, done: null, stage: null, queueAhead: null, errors: {}, error: null };
   });
 }
 
@@ -649,6 +667,14 @@ function getSyncStatus(meta, isTv, season, episode) {
       if (aj.status === "incompatible" || (d && d.status === "incompatible")) {
         return { level: "red", reason: "versioni audio/video diverse", tag: "versioni diverse" };
       }
+      if (aj.status === "failed") {
+        return {
+          level: "red",
+          jobStatus: "failed",
+          reason: aj.error || "errore analisi traccia",
+          tag: "fallito"
+        };
+      }
       return { level: "yellow", jobStatus: "new", reason: "offset da misurare", tag: "da misurare" };
     });
   }).catch(function (e) {
@@ -672,11 +698,19 @@ function syncBadge(sync) {
     icon = sync.stage === "tier2" ? "\uD83D\uDD2C" : "\u2699\uFE0F";
   } else if (sync.jobStatus === "queued" || sync.jobStatus === "new") {
     icon = "\u23F3";
+  } else if (sync.jobStatus === "failed") {
+    icon = "\u274C";
   }
   var short = icon + " " + sync.tag;
   if (sync.level === "green") return { short: short, line: icon + " Audio in sync" };
   if (sync.level === "yellow" && sync.delayMs !== undefined) {
     return { short: short, line: icon + " Ritardo audio " + formatDelay(sync.delayMs) + " applicato in automatico (NuvioTV); altrimenti impostalo a mano" };
+  }
+  if (sync.jobStatus === "failed") {
+    return {
+      short: "\u274C Fallito",
+      line: "\u274C AutoSync fallito (" + (sync.reason || "errore") + ") \u00B7 Prova audio originale o imposta a mano"
+    };
   }
   if (sync.jobStatus === "running") {
     if (sync.stage === "tier2") {
@@ -757,7 +791,7 @@ function getStreams(tmdbId, mediaType, season, episode) {
         if (!byServer[s.server]) byServer[s.server] = [];
         byServer[s.server].push({ resolution: Number(s.qkey), url: s.url });
       });
-      var autoItems = Object.keys(byServer).slice(0, 2).map(function (srv) {
+      var autoItems = Object.keys(byServer).slice(0, 1).map(function (srv) {
         return {
           provider: "movy",
           server: srv,

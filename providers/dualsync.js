@@ -132,10 +132,10 @@ function reportUnmeasuredToAutoSync(payload) {
 }
 
 function getAutoSyncJobs(mediaKey) {
-  if (!AUTOSYNC_API_URL || !mediaKey) return Promise.resolve({ status: null, stage: null, queueAhead: null, measured: [] });
+  if (!AUTOSYNC_API_URL || !mediaKey) return Promise.resolve({ status: null, stage: null, queueAhead: null, measured: [], errors: {} });
   var url = AUTOSYNC_API_URL.replace(/\/jobs\/?$/, "/jobs/status") + "?media_key=" + encodeURIComponent(mediaKey);
   return getJson(url, { "Accept": "application/json" }, 2500).then(function (d) {
-    if (!d || !d.items || !d.items.length) return { status: null, stage: null, queueAhead: null, measured: [] };
+    if (!d || !d.items || !d.items.length) return { status: null, stage: null, queueAhead: null, measured: [], errors: {} };
     var runningJob = d.items.filter(function (it) { return it.status === "running"; })[0] || null;
     var queuedJob = d.items.filter(function (it) { return it.status === "queued"; })[0] || null;
     var incompatible = d.items.some(function (it) { return it.status === "incompatible"; });
@@ -151,7 +151,19 @@ function getAutoSyncJobs(mediaKey) {
       });
     }
     var measured = [];
+    var providerErrors = {};
     d.items.forEach(function (it) {
+      if (it.status === "failed") {
+        var rawErr = String(it.error || it.last_error || "errore analisi");
+        var msg = rawErr;
+        if (/502/i.test(rawErr)) msg = "server offline (502 Bad Gateway)";
+        else if (/404/i.test(rawErr)) msg = "audio/video non trovato (404)";
+        else if (/403/i.test(rawErr)) msg = "accesso bloccato dal server (403)";
+        else if (/timeout/i.test(rawErr)) msg = "timeout connessione";
+        else if (/non correlabili/i.test(rawErr)) msg = "tracce non correlabili";
+        else msg = rawErr.slice(0, 60);
+        providerErrors[(it.provider || "").toLowerCase()] = msg;
+      }
       if (it.status === "done" && it.result && it.result.status === "ok") {
         measured.push({
           provider: it.provider,
@@ -164,9 +176,9 @@ function getAutoSyncJobs(mediaKey) {
         });
       }
     });
-    return { status: status, stage: stage, queueAhead: queueAhead, measured: measured };
+    return { status: status, stage: stage, queueAhead: queueAhead, measured: measured, errors: providerErrors };
   }).catch(function () {
-    return { status: null, stage: null, queueAhead: null, measured: [] };
+    return { status: null, stage: null, queueAhead: null, measured: [], errors: {} };
   });
 }
 
@@ -665,6 +677,18 @@ function syncFor(enc, measured, itaLength, autoJobs) {
   var jobStatus = autoJobs && autoJobs.status;
   var jobStage = autoJobs && autoJobs.stage;
   var queueAhead = autoJobs && autoJobs.queueAhead;
+  var siteKey = (enc.site || "").toLowerCase();
+  if (autoJobs && autoJobs.errors && autoJobs.errors[siteKey]) {
+    var err = autoJobs.errors[siteKey];
+    return {
+      level: "red",
+      jobStatus: "failed",
+      tag: "fallito",
+      error: err,
+      reason: err,
+      itaLength: itaLength
+    };
+  }
   var hit = null;
   (measured || []).forEach(function (m) {
     var d = Math.abs(Number(m.video_duration) - enc.length);
@@ -758,11 +782,19 @@ function syncBadge(sync) {
     icon = sync.stage === "tier2" ? "\uD83D\uDD2C" : "\u2699\uFE0F";
   } else if (sync.jobStatus === "queued" || sync.jobStatus === "new") {
     icon = "\u23F3";
+  } else if (sync.jobStatus === "failed") {
+    icon = "\u274C";
   }
   var short = icon + " " + sync.tag;
   if (sync.level === "green") return { short: short, line: icon + " Audio in sync" };
   if (sync.level === "yellow" && sync.delayMs !== undefined) {
     return { short: short, line: icon + " Ritardo audio " + formatDelay(sync.delayMs) + " applicato in automatico (NuvioTV); altrimenti impostalo a mano" };
+  }
+  if (sync.jobStatus === "failed") {
+    return {
+      short: "\u274C Fallito",
+      line: "\u274C AutoSync fallito (" + (sync.error || sync.reason) + ") \u00B7 Prova audio originale o imposta a mano"
+    };
   }
   if (sync.jobStatus === "running") {
     if (sync.stage === "tier2") {
@@ -869,7 +901,18 @@ function getStreams(tmdbId, mediaType, season, episode) {
       return true;
     });
     if (ita && unmeasuredEncodes.length) {
-      var autoItems = unmeasuredEncodes.map(function (enc) {
+      var providerPriority = function (p) {
+        p = (p || "").toLowerCase();
+        if (p === "movy") return 1;
+        if (p === "vidfast") return 2;
+        if (p === "cinejoy") return 3;
+        return 4;
+      };
+      unmeasuredEncodes.sort(function (a, b) {
+        return providerPriority(a.site) - providerPriority(b.site);
+      });
+
+      var rawAutoItems = unmeasuredEncodes.map(function (enc) {
         var rends = Object.keys(enc.renditions || {}).filter(function (q) {
           return Number(q) >= 1080;
         }).map(function (q) {
@@ -885,6 +928,19 @@ function getStreams(tmdbId, mediaType, season, episode) {
       }).filter(function (it) {
         return it.renditions.length > 0 && it.video_duration >= 30;
       });
+
+      // Deduplica: invia al massimo 1 flusso per provider con la stessa durata (tolleranza 0.25s)
+      var autoItems = [];
+      rawAutoItems.forEach(function (it) {
+        var duplicate = autoItems.some(function (existing) {
+          return existing.provider === it.provider &&
+            Math.abs(existing.video_duration - it.video_duration) <= DB_LENGTH_TOLERANCE_S;
+        });
+        if (!duplicate) {
+          autoItems.push(it);
+        }
+      });
+
       if (autoItems.length) {
         var tracks = [
           { lang: "ita", base_url: ita.audio.uri, headers: ita.headers || {}, source: "vixsrc" }
