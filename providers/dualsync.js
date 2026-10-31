@@ -151,6 +151,7 @@ function getAutoSyncJobs(mediaKey) {
       });
     }
     var measured = [];
+    var failedJobs = [];
     var providerErrors = {};
     d.items.forEach(function (it) {
       if (it.status === "failed") {
@@ -163,6 +164,11 @@ function getAutoSyncJobs(mediaKey) {
         else if (/non correlabili/i.test(rawErr)) msg = "tracce non correlabili";
         else msg = rawErr.slice(0, 60);
         providerErrors[(it.provider || "").toLowerCase()] = msg;
+        failedJobs.push({
+          provider: (it.provider || "").toLowerCase(),
+          video_duration: it.video_duration != null ? Number(it.video_duration) : null,
+          error: msg
+        });
       }
       if (it.status === "done" && it.result && it.result.status === "ok") {
         measured.push({
@@ -176,9 +182,9 @@ function getAutoSyncJobs(mediaKey) {
         });
       }
     });
-    return { status: status, stage: stage, queueAhead: queueAhead, measured: measured, errors: providerErrors };
+    return { status: status, stage: stage, queueAhead: queueAhead, measured: measured, failedJobs: failedJobs, errors: providerErrors };
   }).catch(function () {
-    return { status: null, stage: null, queueAhead: null, measured: [], errors: {} };
+    return { status: null, stage: null, queueAhead: null, measured: [], failedJobs: [], errors: {} };
   });
 }
 
@@ -722,9 +728,16 @@ function syncFor(enc, measured, itaLength, autoJobs) {
     return sync;
   }
 
-  // Se non c'è un offset valido e c'è un errore registrato per questo provider, segnala fallito
-  if (autoJobs && autoJobs.errors && autoJobs.errors[siteKey]) {
-    var err = autoJobs.errors[siteKey];
+  // Se non c'è un offset valido e c'è un errore registrato per questo encode (durata specifica), segnala fallito
+  var matchingFailed = (autoJobs && autoJobs.failedJobs || []).find(function (f) {
+    if (f.provider && f.provider !== siteKey) return false;
+    if (f.video_duration != null && enc.length != null) {
+      return Math.abs(f.video_duration - enc.length) <= DB_LENGTH_TOLERANCE_S;
+    }
+    return f.video_duration == null;
+  });
+  if (matchingFailed) {
+    var err = matchingFailed.error;
     return {
       level: "red",
       jobStatus: "failed",
@@ -926,7 +939,8 @@ function getStreams(tmdbId, mediaType, season, episode) {
     if (autoJobs.measured && autoJobs.measured.length) {
       autoJobs.measured.forEach(function (am) {
         var exists = measured.some(function (m) {
-          return Math.abs(Number(m.video_duration) - am.video_duration) <= DB_LENGTH_TOLERANCE_S;
+          var providerMatch = !m.provider || !am.provider || (m.provider || "").toLowerCase() === (am.provider || "").toLowerCase();
+          return providerMatch && Math.abs(Number(m.video_duration) - am.video_duration) <= DB_LENGTH_TOLERANCE_S;
         });
         if (!exists) measured.push(am);
       });
@@ -1088,5 +1102,5 @@ function getStreams(tmdbId, mediaType, season, episode) {
   });
 }
 
-if (typeof module !== "undefined" && module.exports) module.exports = { getStreams: getStreams };
+if (typeof module !== "undefined" && module.exports) module.exports = { getStreams: getStreams, syncFor: syncFor, getAutoSyncJobs: getAutoSyncJobs };
 if (typeof globalThis !== "undefined") globalThis.getStreams = getStreams;

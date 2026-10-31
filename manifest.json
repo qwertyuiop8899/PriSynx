@@ -1,6 +1,6 @@
 {
   "name": "PriSynx",
-  "version": "1.5.10",
+  "version": "1.5.11",
   "description": "Suite di streaming per Nuvio con sorgenti italiane/internazionali, sync audio e multi-qualità",
   "author": "PriSynx",
   "scrapers": [
@@ -8,7 +8,7 @@
       "id": "prisynx-dualsync",
       "name": "⚡ DualSync",
       "description": "Video 4K/FHD (Cinejoy, Vidfast) + audio ITA con auto-delay ToastFlix/AutoSync",
-      "version": "1.4.3",
+      "version": "1.4.4",
       "author": "PriSynx",
       "resources": [
         "stream"
