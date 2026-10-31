@@ -701,6 +701,28 @@ function syncFor(enc, measured, itaLength, autoJobs) {
   var jobStage = autoJobs && autoJobs.stage;
   var queueAhead = autoJobs && autoJobs.queueAhead;
   var siteKey = (enc.site || "").toLowerCase();
+
+  var hit = null;
+  (measured || []).forEach(function (m) {
+    if (m.provider && (m.provider || "").toLowerCase() !== siteKey) return;
+    var d = Math.abs(Number(m.video_duration) - enc.length);
+    if (d <= DB_LENGTH_TOLERANCE_S && (!hit || d < hit.d)) hit = { m: m, d: d };
+  });
+
+  // Se questo encode ha una misurazione valida con esito "ok", vince sempre sugli errori storici di altri server
+  if (hit && hit.m.status === "ok") {
+    var sync = classifySync(hit.m);
+    sync.measured = hit.m;
+    sync.info = {
+      status: hit.m.status,
+      offsetMs: hit.m.offset == null ? null : Math.round(Number(hit.m.offset) * 1000),
+      rate: Number(hit.m.rate || 1),
+      hasCuts: !!hit.m.has_cuts
+    };
+    return sync;
+  }
+
+  // Se non c'è un offset valido e c'è un errore registrato per questo provider, segnala fallito
   if (autoJobs && autoJobs.errors && autoJobs.errors[siteKey]) {
     var err = autoJobs.errors[siteKey];
     return {
@@ -712,12 +734,7 @@ function syncFor(enc, measured, itaLength, autoJobs) {
       itaLength: itaLength
     };
   }
-  var hit = null;
-  (measured || []).forEach(function (m) {
-    if (m.provider && (m.provider || "").toLowerCase() !== siteKey) return;
-    var d = Math.abs(Number(m.video_duration) - enc.length);
-    if (d <= DB_LENGTH_TOLERANCE_S && (!hit || d < hit.d)) hit = { m: m, d: d };
-  });
+
   if (hit && hit.m.status === "incompatible") {
     if (jobStatus === "running") {
       var isTier2 = jobStage === "tier2";

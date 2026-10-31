@@ -617,6 +617,51 @@ function classifySync(d) {
   return { level: "yellow", delayMs: delayMs, tag: formatDelay(delayMs) };
 }
 
+function syncFromAutoJobs(aj, d) {
+  if (aj && aj.done) {
+    var s = classifySync(aj.done.result);
+    s.info = {
+      status: aj.done.result.status,
+      offsetMs: aj.done.result.offset == null ? null : Math.round(Number(aj.done.result.offset) * 1000),
+      rate: Number(aj.done.result.rate || 1),
+      hasCuts: !!aj.done.result.has_cuts
+    };
+    return s;
+  }
+  if (aj && aj.status === "running") {
+    var isTier2 = aj.stage === "tier2";
+    return {
+      level: "yellow",
+      jobStatus: "running",
+      stage: aj.stage,
+      reason: isTier2 ? "scansione su 7 punti in corso" : "calcolo in corso",
+      tag: isTier2 ? "analisi approfondita" : "in calcolo (~10s)"
+    };
+  }
+  if (aj && aj.status === "queued") {
+    var qTag = (aj.queueAhead === 0) ? "prossimo in coda" : ((aj.queueAhead + 1) + "\u00B0 in coda");
+    return {
+      level: "yellow",
+      jobStatus: "queued",
+      queueAhead: aj.queueAhead,
+      reason: "in coda",
+      tag: qTag
+    };
+  }
+  if ((aj && aj.status === "incompatible") || (d && d.status === "incompatible")) {
+    return { level: "red", reason: "versioni audio/video diverse", tag: "versioni diverse" };
+  }
+  if (aj && aj.status === "failed") {
+    return {
+      level: "red",
+      jobStatus: "failed",
+      reason: aj.error || "errore analisi traccia",
+      tag: "fallito"
+    };
+  }
+  return { level: "yellow", jobStatus: "new", reason: "offset da misurare", tag: "da misurare" };
+}
+
 // Offsets measured by ToastFlix for Movy video vs vixsrc audio; positive offset = audio must be delayed.
 function getSyncStatus(meta, isTv, season, episode) {
   if (!meta.imdbId) return Promise.resolve({ level: "red", reason: "titolo senza IMDb", tag: "no IMDb" });
@@ -624,7 +669,7 @@ function getSyncStatus(meta, isTv, season, episode) {
   var url = TOASTFLIX_URL + "/dual/offset/status?imdb=" + encodeURIComponent(meta.imdbId) +
     "&type=" + (isTv ? "series" : "movie") + "&season=" + (isTv ? Number(season) : 0) +
     "&episode=" + (isTv ? Number(episode) : 0) + "&provider=movy&audio_source=vixsrc";
-  return getJson(url, { "Accept": "application/json" }, 8000).then(function (d) {
+  return getJson(url, { "Accept": "application/json" }, 4000).then(function (d) {
     if (d && d.found && d.status === "ok") {
       var sync = classifySync(d);
       sync.info = {
@@ -637,52 +682,15 @@ function getSyncStatus(meta, isTv, season, episode) {
     }
     // Check AutoSync directly (if ToastFlix returned not found or incompatible)
     return getAutoSyncJobs(mediaKey).then(function (aj) {
-      if (aj.done) {
-        var s = classifySync(aj.done.result);
-        s.info = {
-          status: aj.done.result.status,
-          offsetMs: aj.done.result.offset == null ? null : Math.round(Number(aj.done.result.offset) * 1000),
-          rate: Number(aj.done.result.rate || 1),
-          hasCuts: !!aj.done.result.has_cuts
-        };
-        return s;
-      }
-      if (aj.status === "running") {
-        var isTier2 = aj.stage === "tier2";
-        return {
-          level: "yellow",
-          jobStatus: "running",
-          stage: aj.stage,
-          reason: isTier2 ? "scansione su 7 punti in corso" : "calcolo in corso",
-          tag: isTier2 ? "analisi approfondita" : "in calcolo (~10s)"
-        };
-      }
-      if (aj.status === "queued") {
-        var qTag = (aj.queueAhead === 0) ? "prossimo in coda" : ((aj.queueAhead + 1) + "\u00B0 in coda");
-        return {
-          level: "yellow",
-          jobStatus: "queued",
-          queueAhead: aj.queueAhead,
-          reason: "in coda",
-          tag: qTag
-        };
-      }
-      if (aj.status === "incompatible" || (d && d.status === "incompatible")) {
-        return { level: "red", reason: "versioni audio/video diverse", tag: "versioni diverse" };
-      }
-      if (aj.status === "failed") {
-        return {
-          level: "red",
-          jobStatus: "failed",
-          reason: aj.error || "errore analisi traccia",
-          tag: "fallito"
-        };
-      }
-      return { level: "yellow", jobStatus: "new", reason: "offset da misurare", tag: "da misurare" };
+      return syncFromAutoJobs(aj, d);
     });
   }).catch(function (e) {
-    console.warn("[MovyITA] ToastFlix sync status: " + e.message);
-    return { level: "unknown", reason: "ToastFlix non raggiungibile", tag: "sync n/d" };
+    console.warn("[MovyITA] ToastFlix sync status warning (" + e.message + "), fallback ad AutoSync...");
+    return getAutoSyncJobs(mediaKey).then(function (aj) {
+      return syncFromAutoJobs(aj, null);
+    }).catch(function () {
+      return { level: "unknown", reason: "sync n/d", tag: "sync n/d" };
+    });
   });
 }
 
