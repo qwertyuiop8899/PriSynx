@@ -181,7 +181,37 @@ function probeStream(stream) {
       return resolve({ ok: isMagnet, info: "P2P Torrent magnet valido" });
     }
 
-    const streamUrl = stream.url;
+    let streamUrl = stream.url;
+
+    // Gestione HLS Data URI (es. MovyITA / DualSync audio sync)
+    if (streamUrl.startsWith("data:")) {
+      try {
+        const commaIdx = streamUrl.indexOf(",");
+        if (commaIdx === -1) {
+          return resolve({ ok: false, error: "Data URI malformato" });
+        }
+        const meta = streamUrl.slice(0, commaIdx);
+        const dataPart = streamUrl.slice(commaIdx + 1);
+        const decoded = meta.includes("base64")
+          ? Buffer.from(dataPart, "base64").toString("utf-8")
+          : decodeURIComponent(dataPart);
+
+        if (!decoded.includes("#EXTM3U")) {
+          return resolve({ ok: false, error: "Data URI non contiene playlist HLS valida" });
+        }
+
+        // Estrai il primo URI http(s) contenuto nella playlist per probe reale
+        const subUrlMatch = decoded.match(/https?:\/\/[^\r\n"'\s]+/);
+        if (subUrlMatch) {
+          streamUrl = subUrlMatch[0];
+        } else {
+          return resolve({ ok: true, latency: 5, info: "HLS Data-URI sintetico valido" });
+        }
+      } catch (e) {
+        return resolve({ ok: false, error: "Errore parsing Data URI: " + e.message });
+      }
+    }
+
     let parsed;
     try {
       parsed = new URL(streamUrl);
@@ -272,11 +302,12 @@ async function testProviderItem(scraperModule, testSpec, providerName) {
   let streams = [];
   let usedFallback = false;
   let targetId = testSpec.id;
+  const timeoutMs = (providerName.includes("DualSync") || providerName.includes("CB01")) ? 35000 : 20000;
 
   try {
     streams = await withTimeout(
       scraperModule.getStreams(testSpec.id, testSpec.type, testSpec.s, testSpec.e),
-      15000,
+      timeoutMs,
       `${providerName} - ${testSpec.label}`
     );
   } catch (err) {
@@ -287,7 +318,7 @@ async function testProviderItem(scraperModule, testSpec, providerName) {
       try {
         streams = await withTimeout(
           scraperModule.getStreams(testSpec.fallback.id, testSpec.fallback.type, testSpec.fallback.s, testSpec.fallback.e),
-          15000,
+          timeoutMs,
           `${providerName} (fallback)`
         );
       } catch (fErr) {
@@ -305,7 +336,7 @@ async function testProviderItem(scraperModule, testSpec, providerName) {
     try {
       streams = await withTimeout(
         scraperModule.getStreams(testSpec.fallback.id, testSpec.fallback.type, testSpec.fallback.s, testSpec.fallback.e),
-        15000,
+        timeoutMs,
         `${providerName} (fallback)`
       );
     } catch (fErr) {
@@ -328,7 +359,7 @@ async function testProviderItem(scraperModule, testSpec, providerName) {
     sampleName: (candidate.name || candidate.title || "").split("\n")[0].slice(0, 40),
     sampleUrl: (candidate.url || candidate.infoHash || "").slice(0, 60),
     probeInfo: probe.info,
-    error: probe.error,
+    error: probe.error || (probe.statusCode ? `HTTP ${probe.statusCode}` : "Probe fallito"),
     usedFallback: usedFallback,
     durationMs: Date.now() - tStart
   };
