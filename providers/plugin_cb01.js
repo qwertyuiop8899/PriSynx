@@ -110,7 +110,7 @@ function resolveActiveDomain(cb) {
         activeDomain = match[1];
       } else {
         // Fallback to active mirror if redirect header is masked by native bridge
-        activeDomain = 'cb01uno.wiki';
+        activeDomain = 'cb01one.stream';
       }
       isResolvingDomain = false;
       var q = resolveQueue;
@@ -118,7 +118,7 @@ function resolveActiveDomain(cb) {
       q.forEach(function (c) { c(activeDomain); });
     })
     .catch(function () {
-      activeDomain = 'cb01uno.wiki';
+      activeDomain = 'cb01one.stream';
       isResolvingDomain = false;
       var q = resolveQueue;
       resolveQueue = [];

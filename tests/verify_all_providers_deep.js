@@ -45,7 +45,7 @@ const PROVIDERS = [
     name: "🍿 Eurostreaming",
     file: "../providers/plugin_es_nuvio.js",
     tests: [
-      { label: "Serie (Breaking Bad)", id: "tt0903747", type: "series", s: 1, e: 1, fallback: { id: "tt0944947", type: "series", s: 1, e: 1 } }
+      { label: "Serie (Chicago Fire S13E01)", id: "tt2261391", type: "series", s: 13, e: 1, fallback: { id: "tt0903747", type: "series", s: 1, e: 1 } }
     ]
   },
   {
