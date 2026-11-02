@@ -1,0 +1,3 @@
+node_modules/
+tests/latest_health.json
+.DS_Store

@@ -10,6 +10,8 @@
 const http = require("http");
 const https = require("https");
 const { URL } = require("url");
+const fs = require("fs");
+const path = require("path");
 
 // Configurazione dei Provider e Titoli di Test
 const PROVIDERS = [
@@ -447,6 +449,55 @@ async function main() {
   console.log("================================================================================");
 
   const failCount = results.filter(r => r.status !== "OK").length;
+
+  try {
+    const jsonPath = path.join(__dirname, "latest_health.json");
+    let existingProviders = [];
+    if (fs.existsSync(jsonPath)) {
+      try {
+        const prev = JSON.parse(fs.readFileSync(jsonPath, "utf8"));
+        if (prev && Array.isArray(prev.providers)) {
+          existingProviders = prev.providers;
+        }
+      } catch (e) {}
+    }
+
+    const currentProviders = results.map(r => ({
+      id: r.id,
+      name: r.name,
+      status: r.status,
+      totalStreams: r.totalStreams || 0,
+      latency: r.latency || 0,
+      note: r.status === "OK"
+        ? (r.details && r.details[0] && r.details[0].outcome && r.details[0].outcome.probeInfo || "Video raggiungibile")
+        : (r.error || "Errore sconosciuto"),
+      details: (r.details || []).map(d => ({
+        label: d.label,
+        streamsCount: (d.outcome && d.outcome.streams) ? d.outcome.streams.length : 0,
+        probe: d.outcome ? d.outcome.probeInfo : null
+      }))
+    }));
+
+    // Merge: update existing with newly tested, keep others
+    const mergedMap = new Map();
+    existingProviders.forEach(p => mergedMap.set(p.id, p));
+    currentProviders.forEach(p => mergedMap.set(p.id, p));
+    const mergedList = Array.from(mergedMap.values());
+
+    const healthData = {
+      timestamp: new Date().toISOString(),
+      total: mergedList.length,
+      online: mergedList.filter(r => r.status === "OK").length,
+      failed: mergedList.filter(r => r.status !== "OK").length,
+      providers: mergedList
+    };
+
+    fs.writeFileSync(jsonPath, JSON.stringify(healthData, null, 2), "utf8");
+    console.log(`\n[Info] Risultati salvati in ${jsonPath}`);
+  } catch (e) {
+    console.warn(`[Warn] Impossibile salvare latest_health.json: ${e.message}`);
+  }
+
   if (failCount > 0) {
     console.log(`\nAttenzione: ${failCount} provider necessitano di intervento.\n`);
     process.exitCode = 1;
