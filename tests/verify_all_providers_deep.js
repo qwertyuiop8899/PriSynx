@@ -225,6 +225,9 @@ function probeStream(stream) {
       "Accept": "*/*"
     };
 
+    if (stream.headers) {
+      Object.assign(headers, stream.headers);
+    }
     if (stream.behaviorHints && stream.behaviorHints.proxyHeaders && stream.behaviorHints.proxyHeaders.request) {
       Object.assign(headers, stream.behaviorHints.proxyHeaders.request);
     } else if (stream.behaviorHints && stream.behaviorHints.headers) {
