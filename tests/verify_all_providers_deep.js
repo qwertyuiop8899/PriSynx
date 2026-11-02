@@ -79,8 +79,8 @@ const PROVIDERS = [
     name: "🌐 PaCC",
     file: "../providers/pa.cc.js",
     tests: [
-      { label: "Film (Interstellar)", id: "tt0816692", type: "movie", fallback: { id: "tt1375666", type: "movie" } },
-      { label: "Serie (Breaking Bad)", id: "tt0903747", type: "series", s: 1, e: 1, fallback: { id: "tt0944947", type: "series", s: 1, e: 1 } }
+      { label: "Film (Gladiator)", id: "tt0172495", type: "movie", fallback: { id: "tt0816692", type: "movie" } },
+      { label: "Serie (Stranger Things)", id: "tt4574334", type: "series", s: 1, e: 1, fallback: { id: "tt1190634", type: "series", s: 1, e: 1 } }
     ]
   },
   {
@@ -97,7 +97,7 @@ const PROVIDERS = [
     name: "🎞️ Guardoserie",
     file: "../providers/guardoserie.js",
     tests: [
-      { label: "Serie (Breaking Bad)", id: "tt0903747", type: "series", s: 1, e: 1, fallback: { id: "tt0944947", type: "series", s: 1, e: 1 } }
+      { label: "Serie (Stranger Things)", id: "tt4574334", type: "series", s: 1, e: 1, fallback: { id: "tt0903747", type: "series", s: 1, e: 1 } }
     ]
   },
   {

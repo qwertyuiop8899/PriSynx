@@ -114,7 +114,7 @@ function rankPosts(posts, keys, year, isMovie) {
     if (!p || !p.link || seen[p.link] || String(p.link).indexOf(section) < 0) return;
     seen[p.link] = true;
     var c = parsePost(p);
-    c.weak = keys.indexOf(c.key) < 0;
+    c.weak = keys.indexOf(c.key) < 0 && !keys.some(function (k) { return c.key.indexOf(k) === 0; });
     if (c.weak && (!year || !c.tail || keys.indexOf(c.tail) < 0)) return;
     if (year && (isMovie || c.year) && (!c.year || Math.abs(c.year - year) > 1)) return;
     c.yearDiff = (year && c.year) ? Math.abs(c.year - year) : 0;
@@ -222,10 +222,12 @@ function findLink(meta, isMovie, season, episode) {
 // UC_URLS solve captchas (add more to spread the Workers AI quota); UC_PEERS are only read for cached players.
 var UC_MASK = 'q7Lx2Vd';
 var UC_URLS = [
+  '075228564124011a45230f1c670b1f5e2014573a0a14472356573350471a220f53324915523e1d5a220d06186342412610055f',
   '075228564124011a45230f1c640b1f5e2014573a0a144723565d3f120459611946260519543c0d1d795e0247380c5a'
 ];
 var UC_PEERS = [
-  '075228564124011a45230f1c670b1f5e2014573a0a14472356573350471a220f53324915523e1d5a220d06186342412610055f'
+  '075228564124011a45230f1c670b1f5e2014573a0a14472356573350471a220f53324915523e1d5a220d06186342412610055f',
+  '075228564124011a45230f1c640b1f5e2014573a0a144723565d3f120459611946260519543c0d1d795e0247380c5a'
 ];
 var UC_KEY = '0959350b5b2414';
 var UP_UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36';
