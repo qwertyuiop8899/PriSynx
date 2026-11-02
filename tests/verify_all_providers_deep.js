@@ -45,7 +45,8 @@ const PROVIDERS = [
     name: "🍿 Eurostreaming",
     file: "../providers/plugin_es_nuvio.js",
     tests: [
-      { label: "Serie (Chicago Fire S13E01)", id: "tt2261391", type: "series", s: 13, e: 1, fallback: { id: "tt0903747", type: "series", s: 1, e: 1 } }
+      { label: "Serie (Chicago Fire S01E01 - Turbovid/MaxStream)", id: "tt2261391", type: "series", s: 1, e: 1, fallback: { id: "tt0903747", type: "series", s: 1, e: 1 } },
+      { label: "Serie (Chicago Fire S13E01 - MixDrop/DeltaBit/MaxStream)", id: "tt2261391", type: "series", s: 13, e: 1, fallback: { id: "tt0903747", type: "series", s: 1, e: 1 } }
     ]
   },
   {
@@ -370,9 +371,9 @@ async function testProviderItem(scraperModule, testSpec, providerName) {
 
 // Main Runner
 async function main() {
-  const filterArg = process.argv[2] ? process.argv[2].toLowerCase() : null;
-  const providersToTest = filterArg
-    ? PROVIDERS.filter(p => p.id.includes(filterArg) || p.name.toLowerCase().includes(filterArg))
+  const filterArgs = process.argv.slice(2).map(a => a.toLowerCase()).filter(Boolean);
+  const providersToTest = filterArgs.length > 0
+    ? PROVIDERS.filter(p => filterArgs.some(arg => p.id.includes(arg) || p.name.toLowerCase().includes(arg)))
     : PROVIDERS;
 
   console.log("================================================================================");
