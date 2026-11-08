@@ -238,7 +238,7 @@ var UC_PEERS = [
   '075228564124011a45230f1c390a185b201d5e3801015862175b20111f1a2d1051221410543c0d1d795e0247380c5a'
 ];
 var UC_KEY = '0959350b5b2414';
-var UP_UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36';
+var UP_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 // Uprot sets these after the first solved captcha; without them some links ask for a second one.
 var UP_COOKIE2 = 'ccd14f7d7ee32ff386eefcfda920a476';
 
@@ -381,13 +381,50 @@ function _absoluteUrl(loc, base) {
 // Runtimes that always follow redirects lose the body, so the player URL is rebuilt from the VID.
 var MS_PLAYER = /^https?:\/\/(?:www\.)?maxstream\.video\/(?!uprot)[A-Za-z0-9]+\/[A-Za-z0-9]+\/?$/i;
 
+var _cachedMaxstreamPrefix = null;
+var _cachedPrefixTime = 0;
+
+function getActiveMaxstreamPrefix() {
+  var now = Date.now();
+  if (_cachedMaxstreamPrefix && (now - _cachedPrefixTime < 3600000)) {
+    return Promise.resolve(_cachedMaxstreamPrefix);
+  }
+  return _customFetch('https://maxstream.video/', { headers: { 'User-Agent': UP_UA } })
+    .then(function (r) { return r.text(); })
+    .then(function (html) {
+      var m = String(html || '').match(/src=["']https?:\/\/(?:www\.)?maxstream\.video\/([A-Za-z0-9]+)\/[A-Za-z0-9]+["']/i);
+      if (m && m[1]) {
+        _cachedMaxstreamPrefix = m[1];
+        _cachedPrefixTime = Date.now();
+        return _cachedMaxstreamPrefix;
+      }
+      return _cachedMaxstreamPrefix || 'emiatgfr';
+    })
+    .catch(function () { return _cachedMaxstreamPrefix || 'emiatgfr'; });
+}
+
+function normalizeMaxstreamPlayer(url) {
+  if (!url) return Promise.resolve(null);
+  return getActiveMaxstreamPrefix().then(function (prefix) {
+    var m = String(url).match(/^https?:\/\/(?:www\.)?maxstream\.video\/([A-Za-z0-9]+)\/([A-Za-z0-9]+)\/?$/i);
+    if (m && m[1] !== prefix) {
+      return 'https://maxstream.video/' + prefix + '/' + m[2];
+    }
+    return url;
+  });
+}
+
 function maxstreamPlayerUrl(uprotsUrl) {
   var vid = null;
   function vidFrom(u) {
     var m = String(u || '').match(/\/freeswatcee\/([A-Za-z0-9]+)/) || String(u || '').match(/\/videostreax\/[A-Za-z0-9]+\/([A-Za-z0-9]+)/);
     return m ? m[1] : null;
   }
-  function guess() { return vid ? 'https://maxstream.video/emilpy0n/' + vid : null; }
+  function guess() {
+    return getActiveMaxstreamPrefix().then(function (prefix) {
+      return vid ? 'https://maxstream.video/' + prefix + '/' + vid : null;
+    });
+  }
   function hop(url, referer, left) {
     return _customFetch(url, { headers: { 'User-Agent': UP_UA, 'Referer': referer }, redirect: 'manual' })
       .then(function (r) {
@@ -397,17 +434,19 @@ function maxstreamPlayerUrl(uprotsUrl) {
           var hex = String(body || '').match(/rawHex\s*=\s*["']([a-fA-F0-9]{20,8192})["']/);
           if (hex) {
             var player = _hexToText(hex[1]).split('').reverse().join('');
-            if (/^https?:\/\/[^\s"'<>]+$/.test(player)) return player;
+            if (/^https?:\/\/[^\s"'<>]+$/.test(player)) return normalizeMaxstreamPlayer(player);
           }
           var next = loc ? _absoluteUrl(loc, url) : '';
-          if (!vid && MS_PLAYER.test(next)) return next;
-          if (!vid && r.url && r.url !== url && MS_PLAYER.test(r.url)) return r.url;
+          if (!vid && MS_PLAYER.test(next)) return normalizeMaxstreamPlayer(next);
+          if (!vid && r.url && r.url !== url && MS_PLAYER.test(r.url)) return normalizeMaxstreamPlayer(r.url);
           if (next && left > 0) return hop(next, url, left - 1);
           return guess();
         });
       });
   }
-  return hop(uprotsUrl, 'https://maxstream.video/', 1).catch(guess);
+  return hop(uprotsUrl, 'https://maxstream.video/', 1).then(function (p) {
+    return p ? normalizeMaxstreamPlayer(p) : guess();
+  }).catch(guess);
 }
 
 function maxstreamM3u8(playerUrl) {
@@ -495,9 +534,19 @@ function processUprotUrl(link) {
         });
       });
   }
-  // A cached page without a playlist (file removed) is solved again and overwritten.
+  // A cached page without a playlist (file removed or dead prefix) is normalized and retried; if failed, solved again.
   return cachedPlayer(key)
-    .then(function (player) { return player ? maxstreamM3u8(player).catch(function () { return null; }) : null; })
+    .then(function (player) {
+      if (!player) return null;
+      return normalizeMaxstreamPlayer(player)
+        .then(function (norm) {
+          return maxstreamM3u8(norm).then(function (m3u8) {
+            if (m3u8 && norm !== player) storePlayer(key, norm);
+            return m3u8;
+          });
+        })
+        .catch(function () { return null; });
+    })
     .then(function (m3u8) { return m3u8 || solve(); })
     .then(function (m3u8) {
       if (!m3u8) return null;
