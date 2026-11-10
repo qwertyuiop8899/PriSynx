@@ -56,7 +56,7 @@ const PROVIDERS = [
     name: "🎥 Filmez",
     file: "../providers/plugin_filmez.js",
     tests: [
-      { label: "Film (Interstellar)", id: "tt0816692", type: "movie", fallback: { id: "tt1375666", type: "movie" } }
+      { label: "Film (Ice Cream Man)", id: "tt36893729", type: "movie", fallback: { id: "tt14642640", type: "movie" } }
     ]
   },
   {
@@ -64,8 +64,8 @@ const PROVIDERS = [
     name: "📡 OnlineSerieTV",
     file: "../providers/plugin_onlineserietv.js",
     tests: [
-      { label: "Film (Interstellar)", id: "tt0816692", type: "movie", fallback: { id: "tt1375666", type: "movie" } },
-      { label: "Serie (Breaking Bad)", id: "tt0903747", type: "series", s: 1, e: 1, fallback: { id: "tt0944947", type: "series", s: 1, e: 1 } }
+      { label: "Film (Ice Cream Man)", id: "tt36893729", type: "movie", fallback: { id: "tt14642640", type: "movie" } },
+      { label: "Serie (Campus Drivers)", id: "tt39943756", type: "series", s: 1, e: 1, fallback: { id: "tt2261391", type: "series", s: 1, e: 1 } }
     ]
   },
   {

@@ -11,7 +11,21 @@ var UC_URLS = [
   '075228564124011a45230f1c62560956211b1c390d07422255533e0705472d1b42234b5e0d3f0846220c'
 ];
 var UC_KEY = '0959350b5b2414';
-var UP_UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36';
+var UA_POOL = [
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36 Edg/133.0.0.0',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:135.0) Gecko/20100101 Firefox/135.0',
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.2 Safari/605.1.15',
+  'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Mobile Safari/537.36'
+];
+
+function getRandomUA() {
+  return UA_POOL[Math.floor(Math.random() * UA_POOL.length)];
+}
+
+var UP_UA = getRandomUA();
 var MAX_MAXSTREAM = 2;
 var MAX_FOLDERS = 6;
 // Uprot sets these after the first solved captcha; without them folder episodes (msfi) ask for a second one.
@@ -530,9 +544,10 @@ function solveUpCaptcha(cap) {
 }
 
 // Sends the jar's cookies and stores the ones the response sets (runtimes join several Set-Cookie with ",").
-function upPost(link, body, jar) {
+function upPost(link, body, jar, ua) {
+  var activeUa = ua || UP_UA;
   var headers = {
-    'User-Agent': UP_UA,
+    'User-Agent': activeUa,
     'Origin': 'https://uprot.net',
     'Referer': 'https://uprot.net/',
     'Content-Type': 'application/x-www-form-urlencoded'
@@ -549,31 +564,65 @@ function upPost(link, body, jar) {
     });
 }
 
-// Hidden blocks and comments carry decoy links; the real one is a two-segment /uprots/ (msf) or /uprotem/ (msei) link wrapping a button.
+function _atob(b64) {
+  if (typeof atob === 'function') return atob(b64);
+  if (typeof Buffer !== 'undefined') return Buffer.from(b64, 'base64').toString('binary');
+  return null;
+}
+
+function _sleep(ms) {
+  return new Promise(function (resolve) { setTimeout(resolve, ms); });
+}
+
+// Hidden blocks and comments carry decoy links; the real one is either:
+// 1. A span#buttok with onclick="window.location.href=atob('...')" (current uprot format)
+// 2. A two-segment /uprots/ (msf) or /uprotem/ (msei) link wrapping a button (legacy format)
 function findButtok(html) {
   var clean = html
     .replace(/<!--[\s\S]*?-->/g, '')
     .replace(/<div[^>]*style=["'][^"']*display\s*:\s*none[^"']*["'][^>]*>[\s\S]*?<\/div>/gi, '');
+  var atobMatch = clean.match(/id=["']buttok["'][^>]*onclick=["'][^"']*atob\(["']([A-Za-z0-9+/=]+)["']\)/i) ||
+                  clean.match(/onclick=["'][^"']*atob\(["']([A-Za-z0-9+/=]+)["']\)[^"']*["'][^>]*id=["']buttok["']/i);
+  if (atobMatch && atobMatch[1]) {
+    var decoded = _atob(atobMatch[1]);
+    if (/^https?:\/\/[^\s"'<>]+$/i.test(decoded)) return decoded;
+  }
   var m = clean.match(/href=["'](https?:\/\/[^"'\/]+\/uprot[a-z]{0,4}\/[^\/"']+\/[^\/"']+\/?)["'][^>]*>\s*<button/i);
   return m ? m[1] : null;
 }
 
 // A wrong answer, or a changed cookie2, comes back with a new captcha: up to 3 answers.
-function unlockUprot(link) {
-  var jar = { cookie2: UP_COOKIE2, uprot_session_pxx: '1' };
+function unlockUprot(link, ua) {
+  var activeUa = ua || UP_UA;
+  var jar = { uprot_session_pxx: '1' };
+  var getHeaders = {
+    'User-Agent': activeUa,
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8'
+  };
   function attempt(html, left) {
     var direct = findButtok(html);
-    if (direct) return direct;
+    if (direct) return Promise.resolve(direct);
     var cap = parseUpCaptcha(html);
-    if (!cap || !jar.PHPSESSID || left <= 0) return null;
+    if (!cap || !jar.PHPSESSID || left <= 0) return Promise.resolve(null);
     return solveUpCaptcha(cap).then(function (answer) {
-      // No cell picked: a plain reload brings a new grid instead of a wrong answer.
-      return upPost(link, answer ? cap.field + '=' + encodeURIComponent(answer) : '', jar).then(function (next) {
-        return attempt(next, left - 1);
+      return _sleep(1500).then(function () {
+        return upPost(link, answer ? cap.field + '=' + encodeURIComponent(answer) : '', jar, activeUa).then(function (next) {
+          return attempt(next, left - 1);
+        });
       });
     });
   }
-  return upPost(link, '', jar).then(function (html) { return attempt(html, 3); });
+  return _safeFetch(link, { headers: getHeaders, redirect: 'manual' })
+    .then(function (r) {
+      var setCookie = (r.headers && typeof r.headers.get === 'function' && r.headers.get('set-cookie')) || '';
+      var re = /(?:^|,)\s*([A-Za-z0-9_\-]+)=([^;,]*)/g;
+      var m;
+      while ((m = re.exec(setCookie)) !== null) jar[m[1]] = m[2];
+      return r.text().then(function (html) { return attempt(html || '', 3); });
+    })
+    .catch(function () {
+      return upPost(link, '', jar, activeUa).then(function (html) { return attempt(html, 3); });
+    });
 }
 
 // "TUTTE LE STAGIONI" folders need no captcha and list one msfi link per file, named like "Show.S01E01.ITA.WEB.avi".
@@ -618,15 +667,54 @@ function absoluteUrl(loc, base) {
 // uprotem (msei) -> 302 straight to the player page.
 var MS_PLAYER = /^https?:\/\/(?:www\.)?maxstream\.video\/(?!uprot)[A-Za-z0-9]+\/[A-Za-z0-9]+\/?$/i;
 
-function maxstreamPlayerUrl(uprotsUrl) {
+var _cachedMaxstreamPrefix = null;
+var _cachedPrefixTime = 0;
+
+function getActiveMaxstreamPrefix(ua) {
+  var activeUa = ua || UP_UA;
+  var now = Date.now();
+  if (_cachedMaxstreamPrefix && (now - _cachedPrefixTime < 3600000)) {
+    return Promise.resolve(_cachedMaxstreamPrefix);
+  }
+  return _safeFetch('https://maxstream.video/', { headers: { 'User-Agent': activeUa } })
+    .then(function (r) { return r.text(); })
+    .then(function (html) {
+      var m = String(html || '').match(/src=["']https?:\/\/(?:www\.)?maxstream\.video\/([A-Za-z0-9]+)\/[A-Za-z0-9]+["']/i);
+      if (m && m[1]) {
+        _cachedMaxstreamPrefix = m[1];
+        _cachedPrefixTime = Date.now();
+        return _cachedMaxstreamPrefix;
+      }
+      return _cachedMaxstreamPrefix || 'emisghyy';
+    })
+    .catch(function () { return _cachedMaxstreamPrefix || 'emisghyy'; });
+}
+
+function normalizeMaxstreamPlayer(url, ua) {
+  if (!url) return Promise.resolve(null);
+  return getActiveMaxstreamPrefix(ua).then(function (prefix) {
+    var m = String(url).match(/^https?:\/\/(?:www\.)?maxstream\.video\/([A-Za-z0-9]+)\/([A-Za-z0-9]+)\/?$/i);
+    if (m && m[1] !== prefix) {
+      return 'https://maxstream.video/' + prefix + '/' + m[2];
+    }
+    return url;
+  });
+}
+
+function maxstreamPlayerUrl(uprotsUrl, ua) {
+  var activeUa = ua || UP_UA;
   var vid = null;
   function vidFrom(u) {
-    var m = String(u || '').match(/\/freeswatcee\/([A-Za-z0-9]+)/) || String(u || '').match(/\/videostreax\/[A-Za-z0-9]+\/([A-Za-z0-9]+)/);
+    var m = String(u || '').match(/\/freeswatc[A-Za-z0-9]*\/([A-Za-z0-9]+)/) || String(u || '').match(/\/videostreax\/[A-Za-z0-9]+\/([A-Za-z0-9]+)/);
     return m ? m[1] : null;
   }
-  function guess() { return vid ? 'https://maxstream.video/emilpy0n/' + vid : null; }
+  function guess() {
+    return getActiveMaxstreamPrefix(ua).then(function (prefix) {
+      return vid ? 'https://maxstream.video/' + prefix + '/' + vid : null;
+    });
+  }
   function hop(url, referer, left) {
-    return _safeFetch(url, { headers: { 'User-Agent': UP_UA, 'Referer': referer }, redirect: 'manual' })
+    return _safeFetch(url, { headers: { 'User-Agent': activeUa, 'Referer': referer }, redirect: 'manual' })
       .then(function (r) {
         var loc = (r.headers && typeof r.headers.get === 'function' && r.headers.get('location')) || '';
         return r.text().then(function (body) {
@@ -634,21 +722,24 @@ function maxstreamPlayerUrl(uprotsUrl) {
           var hex = String(body || '').match(/rawHex\s*=\s*["']([a-fA-F0-9]{20,8192})["']/);
           if (hex) {
             var player = hexToText(hex[1]).split('').reverse().join('');
-            if (/^https?:\/\/[^\s"'<>]+$/.test(player)) return player;
+            if (/^https?:\/\/[^\s"'<>]+$/.test(player)) return normalizeMaxstreamPlayer(player, activeUa);
           }
           var next = loc ? absoluteUrl(loc, url) : '';
-          if (!vid && MS_PLAYER.test(next)) return next;
-          if (!vid && r.url && r.url !== url && MS_PLAYER.test(r.url)) return r.url;
+          if (!vid && MS_PLAYER.test(next)) return normalizeMaxstreamPlayer(next, activeUa);
+          if (!vid && r.url && r.url !== url && MS_PLAYER.test(r.url)) return normalizeMaxstreamPlayer(r.url, activeUa);
           if (next && left > 0) return hop(next, url, left - 1);
           return guess();
         });
       });
   }
-  return hop(uprotsUrl, 'https://maxstream.video/', 1).catch(guess);
+  return hop(uprotsUrl, 'https://maxstream.video/', 1).then(function (p) {
+    return p ? normalizeMaxstreamPlayer(p, activeUa) : guess();
+  }).catch(guess);
 }
 
-function maxstreamM3u8(playerUrl) {
-  return _safeFetch(playerUrl, { headers: { 'User-Agent': UP_UA, 'Referer': 'https://maxstream.video/' } })
+function maxstreamM3u8(playerUrl, ua) {
+  var activeUa = ua || UP_UA;
+  return _safeFetch(playerUrl, { headers: { 'User-Agent': activeUa, 'Referer': 'https://maxstream.video/' } })
     .then(function (r) { return r.text(); })
     .then(function (html) {
       var text = html || '';
@@ -722,25 +813,36 @@ function storePlayer(key, player) {
   return write(0);
 }
 
-function processUprotUrl(link, quality) {
+function processUprotUrl(link, quality, ua) {
+  var activeUa = ua || getRandomUA();
   var key = uprotKey(link);
   function solve() {
-    return unlockUprot(link)
-      .then(function (uprots) { return uprots ? maxstreamPlayerUrl(uprots) : null; })
+    return unlockUprot(link, activeUa)
+      .then(function (uprots) { return uprots ? maxstreamPlayerUrl(uprots, activeUa) : null; })
       .then(function (player) {
         if (!player) return null;
-        return maxstreamM3u8(player).then(function (m3u8) {
+        return maxstreamM3u8(player, activeUa).then(function (m3u8) {
           return m3u8 ? storePlayer(key, player).then(function () { return m3u8; }) : null;
         });
       });
   }
-  // A cached page without a playlist (file removed) is solved again and overwritten.
+  // A cached page without a playlist (file removed or dead prefix) is normalized and retried; if failed, solved again.
   return cachedPlayer(key)
-    .then(function (player) { return player ? maxstreamM3u8(player).catch(function () { return null; }) : null; })
+    .then(function (player) {
+      if (!player) return null;
+      return normalizeMaxstreamPlayer(player, activeUa)
+        .then(function (norm) {
+          return maxstreamM3u8(norm, activeUa).then(function (m3u8) {
+            if (m3u8 && norm !== player) storePlayer(key, norm);
+            return m3u8;
+          });
+        })
+        .catch(function () { return null; });
+    })
     .then(function (m3u8) { return m3u8 || solve(); })
     .then(function (m3u8) {
       if (!m3u8) return null;
-      var headers = { 'User-Agent': UP_UA, 'Referer': 'https://maxstream.video/' };
+      var headers = { 'User-Agent': activeUa, 'Referer': 'https://maxstream.video/' };
       return hlsQuality(m3u8, headers).then(function (q) {
         return {
           url: m3u8,
