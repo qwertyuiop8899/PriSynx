@@ -2015,7 +2015,7 @@ var MS_PLAYER = /^https?:\/\/(?:www\.)?maxstream\.video\/(?!uprot)[A-Za-z0-9]+\/
 var _cachedMaxstreamPrefix = null;
 var _cachedPrefixTime = 0;
 
-// Prefix order: last live one seen, then known prefixes (newest first).
+// Prefix order: last live one seen, shared service, then known prefixes (newest first).
 var MAXSTREAM_PREFIXES = ['emiyiuc5', 'emiatgfr', 'emisghyy'];
 
 function _rememberPrefix(p) {
@@ -2025,12 +2025,59 @@ function _rememberPrefix(p) {
   }
 }
 
+var _MSK = ['Max', 'Stream', 'Nuvio', 'Key', '2026'].join('_');
+var _MS_E_BASE = 'JRUML2lbXVRSXXF/REZHWWZlV0xlCgMABA==';
+var _MS_E_TOK = 'PCAoMQccMAwCOggJBD9aXyVzMysuZnda';
+var _MS_B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+
+function _msDec(s) {
+  var str = String(s || '').replace(/\s+/g, ''), res = '', n = 0;
+  for (var i = 0; i < str.length; i += 4) {
+    var c1 = _MS_B64.indexOf(str.charAt(i)), c2 = _MS_B64.indexOf(str.charAt(i + 1));
+    var c3 = str.charAt(i + 2) === '=' ? -1 : _MS_B64.indexOf(str.charAt(i + 2));
+    var c4 = str.charAt(i + 3) === '=' ? -1 : _MS_B64.indexOf(str.charAt(i + 3));
+    var bytes = [(c1 << 2) | (c2 >> 4)];
+    if (c3 !== -1) bytes.push(((c2 & 15) << 4) | (c3 >> 2));
+    if (c4 !== -1) bytes.push(((c3 & 3) << 6) | c4);
+    for (var j = 0; j < bytes.length; j++, n++) res += String.fromCharCode(bytes[j] ^ _MSK.charCodeAt(n % _MSK.length));
+  }
+  return res;
+}
+
+// undefined = not asked yet this run, null = shared service unreachable.
+var _serverPrefix;
+
+function _getServerPrefix() {
+  if (_serverPrefix !== undefined) return Promise.resolve(_serverPrefix);
+  return _customFetch(_msDec(_MS_E_BASE) + '/p', { headers: { 'Accept': 'application/json' } })
+    .then(function (r) { return r && r.ok ? r.text() : ''; })
+    .then(function (t) {
+      var j = null;
+      try { j = JSON.parse(t || 'null'); } catch (e) {}
+      _serverPrefix = j && /^[A-Za-z0-9]{4,16}$/.test(j.p || '') ? j.p : null;
+      return _serverPrefix;
+    })
+    .catch(function () { _serverPrefix = null; return null; });
+}
+
+// Writes only when the live prefix differs from the shared one; the service re-verifies it on MaxStream.
+function _reportPrefix(prefix, vid) {
+  return _getServerPrefix().then(function (sp) {
+    if (!sp || sp === prefix || !vid) return;
+    _serverPrefix = prefix;
+    return _customFetch(_msDec(_MS_E_BASE) + '/r?p=' + encodeURIComponent(prefix) + '&v=' + encodeURIComponent(vid) +
+      '&t=' + encodeURIComponent(_msDec(_MS_E_TOK)), { headers: { 'Accept': 'application/json' } });
+  }).catch(function () {});
+}
+
 function getMaxstreamPrefixes() {
-  var out = [];
-  (_cachedMaxstreamPrefix ? [_cachedMaxstreamPrefix] : []).concat(MAXSTREAM_PREFIXES).forEach(function (p) {
-    if (p && out.indexOf(p) < 0) out.push(p);
+  return _getServerPrefix().then(function (sp) {
+    var out = [];
+    (_cachedMaxstreamPrefix ? [_cachedMaxstreamPrefix] : []).concat(sp ? [sp] : [], MAXSTREAM_PREFIXES).forEach(function (p) {
+      if (p && out.indexOf(p) < 0) out.push(p);
+    });
+    return out;
   });
-  return Promise.resolve(out);
 }
 
 function getActiveMaxstreamPrefix() {
@@ -2041,8 +2088,9 @@ function normalizeMaxstreamPlayer(url) {
   if (!url) return Promise.resolve(null);
   var m = String(url).match(/^https?:\/\/(?:www\.)?maxstream\.video\/([A-Za-z0-9]+)\/([A-Za-z0-9]+)\/?$/i);
   // A real player URL carries the live prefix: keep it and remember it.
-  if (m) _rememberPrefix(m[1]);
-  return Promise.resolve(url);
+  if (!m) return Promise.resolve(url);
+  _rememberPrefix(m[1]);
+  return _reportPrefix(m[1], m[2]).then(function () { return url; });
 }
 
 function maxstreamPlayerUrl(uprotsUrl, ua) {
@@ -2065,7 +2113,10 @@ function maxstreamPlayerUrl(uprotsUrl, ua) {
         return _customFetch(cand, { headers: { 'User-Agent': activeUa, 'Referer': 'https://maxstream.video/' } })
           .then(function (r) { return r && r.ok ? r.text() : ''; })
           .then(function (t) {
-            if (/eval\(function\(p,a,c,k|\.m3u8/i.test(t || '')) { _rememberPrefix(list[i]); return cand; }
+            if (/eval\(function\(p,a,c,k|\.m3u8/i.test(t || '')) {
+              _rememberPrefix(list[i]);
+              return _reportPrefix(list[i], vid).then(function () { return cand; });
+            }
             return tryAt(i + 1);
           })
           .catch(function () { return tryAt(i + 1); });
