@@ -770,9 +770,8 @@ function normalizeMaxstreamPlayer(url) {
   if (!url) return Promise.resolve(null);
   var m = String(url).match(/^https?:\/\/(?:www\.)?maxstream\.video\/([A-Za-z0-9]+)\/([A-Za-z0-9]+)\/?$/i);
   // A real player URL carries the live prefix: keep it and remember it.
-  if (!m) return Promise.resolve(url);
-  _rememberPrefix(m[1]);
-  return _reportPrefix(m[1], m[2]).then(function () { return url; });
+  if (m) _rememberPrefix(m[1]);
+  return Promise.resolve(url);
 }
 
 function maxstreamPlayerUrl(uprotsUrl, ua) {
@@ -797,7 +796,7 @@ function maxstreamPlayerUrl(uprotsUrl, ua) {
           .then(function (t) {
             if (/eval\(function\(p,a,c,k|\.m3u8/i.test(t || '')) {
               _rememberPrefix(list[i]);
-              return _reportPrefix(list[i], vid).then(function () { return cand; });
+              return cand;
             }
             return tryAt(i + 1);
           })
@@ -830,7 +829,16 @@ function maxstreamPlayerUrl(uprotsUrl, ua) {
   }).catch(guess);
 }
 
+// Report only prefixes that just produced a stream: cached player URLs can carry dead prefixes.
 function maxstreamM3u8(playerUrl, ua) {
+  return _maxstreamM3u8Raw(playerUrl, ua).then(function (m3u8) {
+    var m = String(playerUrl || '').match(/^https?:\/\/(?:www\.)?maxstream\.video\/([A-Za-z0-9]+)\/([A-Za-z0-9]+)\/?$/i);
+    if (!m3u8 || !m) return m3u8;
+    return _reportPrefix(m[1], m[2]).then(function () { return m3u8; });
+  });
+}
+
+function _maxstreamM3u8Raw(playerUrl, ua) {
   var activeUa = ua || UP_UA;
   return _safeFetch(playerUrl, { headers: { 'User-Agent': activeUa, 'Referer': 'https://maxstream.video/' } })
     .then(function (r) { return r.text(); })
