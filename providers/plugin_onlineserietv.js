@@ -369,37 +369,45 @@ function _sleep(ms) {
   return new Promise(function (resolve) { setTimeout(resolve, ms); });
 }
 
-// Hidden blocks and comments carry decoy links; the real one is either:
-// 1. A span#buttok with onclick="window.location.href=atob('...')" (current uprot format)
-// 2. A two-segment /uprots/ link wrapping a button (legacy format)
+// The real link is the base64 /uprots/ URL behind the unlocked button; decoys sit in comments/hidden blocks.
+// Format-agnostic: try known shapes, then any atob(...) of string vars/literals, then any base64 literal.
+var UPROT_URL = /^https?:\/\/[^\s"'<>\/]+\/uprot[a-z]{0,4}\/[^\s"'<>]+$/i;
+
+function _tryUprot(b64) {
+  if (!b64 || b64.length < 16) return null;
+  var dec = null;
+  try { dec = _atob(b64.replace(/\s+/g, '')); } catch (e) { return null; }
+  return dec && UPROT_URL.test(dec) ? dec : null;
+}
+
 function findButtok(html) {
-  var clean = html
+  var clean = String(html || '')
     .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
     .replace(/<div[^>]*style=["'][^"']*display\s*:\s*none[^"']*["'][^>]*>[\s\S]*?<\/div>/gi, '');
-  var atobMatch = clean.match(/id=["']buttok["'][^>]*onclick=["'][^"']*atob\(["']([A-Za-z0-9+/=]+)["']\)/i) ||
-                  clean.match(/onclick=["'][^"']*atob\(["']([A-Za-z0-9+/=]+)["']\)[^"']*["'][^>]*id=["']buttok["']/i);
-  if (atobMatch && atobMatch[1]) {
-    var decoded = _atob(atobMatch[1]);
-    if (/^https?:\/\/[^\s"'<>]+$/i.test(decoded)) return decoded;
-  }
-  // 3. let partOne = '...'; let partTwo = '...'; let targetLink = atob(partOne + partTwo);
+  var r, m;
+  m = clean.match(/id=["']buttok["'][^>]*onclick=["'][^"']*atob\(["']([A-Za-z0-9+/=]+)["']\)/i) ||
+      clean.match(/onclick=["'][^"']*atob\(["']([A-Za-z0-9+/=]+)["']\)[^"']*["'][^>]*id=["']buttok["']/i);
+  if (m && (r = _tryUprot(m[1]))) return r;
   var vars = {};
-  var vm, vre = /(?:let|var|const)\s+([A-Za-z_$][\w$]*)\s*=\s*["']([A-Za-z0-9+\/=]*)["']/g;
-  while ((vm = vre.exec(clean)) !== null) vars[vm[1]] = vm[2];
-  var am, are = /atob\(\s*([A-Za-z_$][\w$]*(?:\s*\+\s*[A-Za-z_$][\w$]*)*)\s*\)/g;
-  while ((am = are.exec(clean)) !== null) {
-    var parts = am[1].split('+'), b64 = '', ok = true;
-    for (var i = 0; i < parts.length; i++) {
-      var k = parts[i].trim();
-      if (!(k in vars)) { ok = false; break; }
-      b64 += vars[k];
+  var vre = /(?:\b(?:let|var|const)\s+|[;{\s])([A-Za-z_$][\w$]*)\s*=\s*(["'`])([A-Za-z0-9+\/=\s]*)\2/g;
+  while ((m = vre.exec(clean)) !== null) vars[m[1]] = m[3];
+  var are = /atob\(\s*([^()]{1,2000}?)\s*\)/g;
+  while ((m = are.exec(clean)) !== null) {
+    var parts = m[1].split('+'), b64 = '', ok = true;
+    for (var i = 0; i < parts.length && ok; i++) {
+      var t = parts[i].trim(), lit = t.match(/^(["'`])([A-Za-z0-9+\/=\s]*)\1$/);
+      if (lit) b64 += lit[2];
+      else if (Object.prototype.hasOwnProperty.call(vars, t)) b64 += vars[t];
+      else ok = false;
     }
-    if (!ok || !b64) continue;
-    var dec = _atob(b64);
-    if (dec && /^https?:\/\/[^\s"'<>]+\/uprot[a-z]{0,4}\/[^\s"'<>]+$/i.test(dec)) return dec;
+    if (ok && (r = _tryUprot(b64))) return r;
   }
-  var m = clean.match(/href=["'](https?:\/\/[^"'\/]+\/uprot[a-z]{0,4}\/[^\/"']+\/[^\/"']+\/?)["'][^>]*>\s*<button/i);
-  return m ? m[1] : null;
+  m = clean.match(/href=["'](https?:\/\/[^"'\/]+\/uprot[a-z]{0,4}\/[^\/"']+\/[^\/"']+\/?)["'][^>]*>\s*<button/i);
+  if (m) return m[1];
+  var lre = /["'`]([A-Za-z0-9+\/]{24,}={0,2})["'`]/g;
+  while ((m = lre.exec(clean)) !== null) if ((r = _tryUprot(m[1]))) return r;
+  return null;
 }
 
 // A wrong answer, or a changed cookie2, comes back with a new captcha: up to 3 answers.
@@ -414,7 +422,10 @@ function unlockUprot(link, ua) {
     var direct = findButtok(html);
     if (direct) return Promise.resolve(direct);
     var cap = parseUpCaptcha(html);
-    if (!cap || !jar.PHPSESSID || left <= 0) return Promise.resolve(null);
+    if (!cap || !jar.PHPSESSID || left <= 0) {
+      if (!cap) console.log('[uprot] no button and no captcha: page format changed? ' + link);
+      return Promise.resolve(null);
+    }
     return solveUpCaptcha(cap).then(function (answer) {
       return _sleep(1500).then(function () {
         return upPost(link, answer ? cap.field + '=' + encodeURIComponent(answer) : '', jar, activeUa).then(function (next) {
@@ -450,41 +461,49 @@ var MS_PLAYER = /^https?:\/\/(?:www\.)?maxstream\.video\/(?!uprot)[A-Za-z0-9]+\/
 var _cachedMaxstreamPrefix = null;
 var _cachedPrefixTime = 0;
 
-function getActiveMaxstreamPrefix(ua) {
-  var activeUa = ua || UP_UA;
-  var now = Date.now();
-  if (_cachedMaxstreamPrefix && (now - _cachedPrefixTime < 3600000)) {
-    return Promise.resolve(_cachedMaxstreamPrefix);
+// Prefix order: last live one seen, remote list (editable on GitHub without a release), hardcoded fallback.
+var MAXSTREAM_PREFIX_URL = 'https://raw.githubusercontent.com/qwertyuiop8899/PriSynx/main/maxstream.json';
+var MAXSTREAM_PREFIXES = ['emiyiuc5', 'emiatgfr', 'emisghyy'];
+var _remotePrefixes = null;
+
+function _rememberPrefix(p) {
+  if (p && /^[A-Za-z0-9]{4,16}$/.test(p) && p !== 'uprots' && p !== 'uprot') {
+    _cachedMaxstreamPrefix = p;
+    _cachedPrefixTime = Date.now();
   }
-  return _customFetch('https://maxstream.video/', { headers: { 'User-Agent': activeUa } })
-    .then(function (r) { return r.text(); })
-    .then(function (html) {
-      var m = String(html || '').match(/src=["']https?:\/\/(?:www\.)?maxstream\.video\/([A-Za-z0-9]+)\/[A-Za-z0-9]+["']/i);
-      if (m && m[1]) {
-        _cachedMaxstreamPrefix = m[1];
-        _cachedPrefixTime = Date.now();
-        return _cachedMaxstreamPrefix;
-      }
-      return _cachedMaxstreamPrefix || 'emiyiuc5';
-    })
-    .catch(function () { return _cachedMaxstreamPrefix || 'emiyiuc5'; });
 }
 
-function normalizeMaxstreamPlayer(url, ua) {
+function getMaxstreamPrefixes() {
+  var head = _cachedMaxstreamPrefix ? [_cachedMaxstreamPrefix] : [];
+  function merge(list) {
+    var out = [];
+    head.concat(list || [], MAXSTREAM_PREFIXES).forEach(function (p) {
+      if (p && /^[A-Za-z0-9]{4,16}$/.test(p) && out.indexOf(p) < 0) out.push(p);
+    });
+    return out;
+  }
+  if (_remotePrefixes) return Promise.resolve(merge(_remotePrefixes));
+  return _customFetch(MAXSTREAM_PREFIX_URL, { headers: { 'Accept': 'application/json' } })
+    .then(function (r) { return r && r.ok ? r.text() : ''; })
+    .then(function (t) {
+      var j = null;
+      try { j = JSON.parse(t || 'null'); } catch (e) {}
+      _remotePrefixes = j && Array.isArray(j.prefixes) ? j.prefixes : [];
+      return merge(_remotePrefixes);
+    })
+    .catch(function () { _remotePrefixes = []; return merge([]); });
+}
+
+function getActiveMaxstreamPrefix() {
+  return getMaxstreamPrefixes().then(function (list) { return list[0]; });
+}
+
+function normalizeMaxstreamPlayer(url) {
   if (!url) return Promise.resolve(null);
-  return getActiveMaxstreamPrefix(ua).then(function (prefix) {
-    var m = String(url).match(/^https?:\/\/(?:www\.)?maxstream\.video\/([A-Za-z0-9]+)\/([A-Za-z0-9]+)\/?$/i);
-    if (m) {
-      // A real player URL carries the live prefix: trust it over the fallback.
-      _cachedMaxstreamPrefix = m[1];
-      _cachedPrefixTime = Date.now();
-      return url;
-    }
-    if (false) {
-      return 'https://maxstream.video/' + prefix + '/' + m[2];
-    }
-    return url;
-  });
+  var m = String(url).match(/^https?:\/\/(?:www\.)?maxstream\.video\/([A-Za-z0-9]+)\/([A-Za-z0-9]+)\/?$/i);
+  // A real player URL carries the live prefix: keep it and remember it.
+  if (m) _rememberPrefix(m[1]);
+  return Promise.resolve(url);
 }
 
 function maxstreamPlayerUrl(uprotsUrl, ua) {
@@ -495,8 +514,24 @@ function maxstreamPlayerUrl(uprotsUrl, ua) {
     return m ? m[1] : null;
   }
   function guess() {
-    return getActiveMaxstreamPrefix(ua).then(function (prefix) {
-      return vid ? 'https://maxstream.video/' + prefix + '/' + vid : null;
+    if (!vid) return Promise.resolve(null);
+    return getMaxstreamPrefixes().then(function (list) {
+      list = list.slice(0, 3);
+      function tryAt(i) {
+        if (i >= list.length) {
+          console.log('[maxstream] no working prefix for ' + vid + ' (tried ' + list.join(',') + ')');
+          return null;
+        }
+        var cand = 'https://maxstream.video/' + list[i] + '/' + vid;
+        return _customFetch(cand, { headers: { 'User-Agent': activeUa, 'Referer': 'https://maxstream.video/' } })
+          .then(function (r) { return r && r.ok ? r.text() : ''; })
+          .then(function (t) {
+            if (/eval\(function\(p,a,c,k|\.m3u8/i.test(t || '')) { _rememberPrefix(list[i]); return cand; }
+            return tryAt(i + 1);
+          })
+          .catch(function () { return tryAt(i + 1); });
+      }
+      return tryAt(0);
     });
   }
   function hop(url, referer, left) {
