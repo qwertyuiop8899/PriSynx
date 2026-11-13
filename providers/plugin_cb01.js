@@ -697,10 +697,8 @@ var MS_PLAYER = /^https?:\/\/(?:www\.)?maxstream\.video\/(?!uprot)[A-Za-z0-9]+\/
 var _cachedMaxstreamPrefix = null;
 var _cachedPrefixTime = 0;
 
-// Prefix order: last live one seen, remote list (editable on GitHub without a release), hardcoded fallback.
-var MAXSTREAM_PREFIX_URL = 'https://raw.githubusercontent.com/qwertyuiop8899/PriSynx/main/maxstream.json';
+// Prefix order: last live one seen, then known prefixes (newest first).
 var MAXSTREAM_PREFIXES = ['emiyiuc5', 'emiatgfr', 'emisghyy'];
-var _remotePrefixes = null;
 
 function _rememberPrefix(p) {
   if (p && /^[A-Za-z0-9]{4,16}$/.test(p) && p !== 'uprots' && p !== 'uprot') {
@@ -710,24 +708,11 @@ function _rememberPrefix(p) {
 }
 
 function getMaxstreamPrefixes() {
-  var head = _cachedMaxstreamPrefix ? [_cachedMaxstreamPrefix] : [];
-  function merge(list) {
-    var out = [];
-    head.concat(list || [], MAXSTREAM_PREFIXES).forEach(function (p) {
-      if (p && /^[A-Za-z0-9]{4,16}$/.test(p) && out.indexOf(p) < 0) out.push(p);
-    });
-    return out;
-  }
-  if (_remotePrefixes) return Promise.resolve(merge(_remotePrefixes));
-  return _safeFetch(MAXSTREAM_PREFIX_URL, { headers: { 'Accept': 'application/json' } })
-    .then(function (r) { return r && r.ok ? r.text() : ''; })
-    .then(function (t) {
-      var j = null;
-      try { j = JSON.parse(t || 'null'); } catch (e) {}
-      _remotePrefixes = j && Array.isArray(j.prefixes) ? j.prefixes : [];
-      return merge(_remotePrefixes);
-    })
-    .catch(function () { _remotePrefixes = []; return merge([]); });
+  var out = [];
+  (_cachedMaxstreamPrefix ? [_cachedMaxstreamPrefix] : []).concat(MAXSTREAM_PREFIXES).forEach(function (p) {
+    if (p && out.indexOf(p) < 0) out.push(p);
+  });
+  return Promise.resolve(out);
 }
 
 function getActiveMaxstreamPrefix() {
