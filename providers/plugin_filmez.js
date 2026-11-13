@@ -382,6 +382,22 @@ function findButtok(html) {
     var decoded = _atob(atobMatch[1]);
     if (/^https?:\/\/[^\s"'<>]+$/i.test(decoded)) return decoded;
   }
+  // 3. let partOne = '...'; let partTwo = '...'; let targetLink = atob(partOne + partTwo);
+  var vars = {};
+  var vm, vre = /(?:let|var|const)\s+([A-Za-z_$][\w$]*)\s*=\s*["']([A-Za-z0-9+\/=]*)["']/g;
+  while ((vm = vre.exec(clean)) !== null) vars[vm[1]] = vm[2];
+  var am, are = /atob\(\s*([A-Za-z_$][\w$]*(?:\s*\+\s*[A-Za-z_$][\w$]*)*)\s*\)/g;
+  while ((am = are.exec(clean)) !== null) {
+    var parts = am[1].split('+'), b64 = '', ok = true;
+    for (var i = 0; i < parts.length; i++) {
+      var k = parts[i].trim();
+      if (!(k in vars)) { ok = false; break; }
+      b64 += vars[k];
+    }
+    if (!ok || !b64) continue;
+    var dec = _atob(b64);
+    if (dec && /^https?:\/\/[^\s"'<>]+\/uprot[a-z]{0,4}\/[^\s"'<>]+$/i.test(dec)) return dec;
+  }
   var m = clean.match(/href=["'](https?:\/\/[^"'\/]+\/uprot[a-z]{0,4}\/[^\/"']+\/[^\/"']+\/?)["'][^>]*>\s*<button/i);
   return m ? m[1] : null;
 }
@@ -449,16 +465,22 @@ function getActiveMaxstreamPrefix(ua) {
         _cachedPrefixTime = Date.now();
         return _cachedMaxstreamPrefix;
       }
-      return _cachedMaxstreamPrefix || 'emisghyy';
+      return _cachedMaxstreamPrefix || 'emiyiuc5';
     })
-    .catch(function () { return _cachedMaxstreamPrefix || 'emisghyy'; });
+    .catch(function () { return _cachedMaxstreamPrefix || 'emiyiuc5'; });
 }
 
 function normalizeMaxstreamPlayer(url, ua) {
   if (!url) return Promise.resolve(null);
   return getActiveMaxstreamPrefix(ua).then(function (prefix) {
     var m = String(url).match(/^https?:\/\/(?:www\.)?maxstream\.video\/([A-Za-z0-9]+)\/([A-Za-z0-9]+)\/?$/i);
-    if (m && m[1] !== prefix) {
+    if (m) {
+      // A real player URL carries the live prefix: trust it over the fallback.
+      _cachedMaxstreamPrefix = m[1];
+      _cachedPrefixTime = Date.now();
+      return url;
+    }
+    if (false) {
       return 'https://maxstream.video/' + prefix + '/' + m[2];
     }
     return url;
