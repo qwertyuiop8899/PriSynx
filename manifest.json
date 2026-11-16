@@ -433,7 +433,7 @@
       "id": "prisynx-animeunity",
       "name": "🏮 AnimeUnity",
       "description": "Anime in streaming ITA e SUB-ITA da AnimeUnity in HLS (VixCloud)",
-      "version": "1.1.2",
+      "version": "1.1.3",
       "author": "PriSynx",
       "resources": [
         "stream"

@@ -3,7 +3,7 @@
 // Complete standalone implementation with zero external framework/proxy dependencies.
 
 var DEFAULT_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
-var AU_BASE = "https://www.animeunity.to";
+var AU_BASE = "https://animeunity.cx";
 var TMDB_KEY = (typeof TMDB_API_KEY !== "undefined" && TMDB_API_KEY) ? TMDB_API_KEY : "68e094699525b18a70bab2f86b1fa706";
 var TMDB_BASE = "https://api.themoviedb.org/3";
 var REQUEST_TIMEOUT_MS = 10000;
@@ -387,6 +387,7 @@ function auRequest(url, kind, referer) {
     for (var attempt = 0; attempt < 2; attempt++) {
       res = yield fetchWithTimeout(url, { headers: auHeaders(kind, referer) }, REQUEST_TIMEOUT_MS);
       auStoreCookies(res);
+      auAdoptHost(res);
       if (res.ok) {
         var text = yield res.text();
         if (kind !== "xhr") auStoreCsrf(text);
@@ -402,12 +403,70 @@ function auRequest(url, kind, referer) {
   });
 }
 
+// Follow domain moves (.to -> .co -> .cx): adopt the final host after redirects.
+function auAdoptHost(res) {
+  var o = (String((res && res.url) || "").match(/^https?:\/\/[^\/?#]+/i) || [])[0];
+  if (o && /animeunity/i.test(o)) AU_BASE = o;
+}
+
 // ---------------------------------------------------------------- AnimeUnity Page Parser
 
-function resolveEpisodeEmbedUrl(animePath, requestedEpisode) {
+// New site (Inertia.js): page data is JSON in <div id="app" data-page="...">.
+function auParseInertia(html) {
+  var m = String(html || "").match(/data-page="([^"]*)"/);
+  if (!m) return null;
+  try {
+    var j = JSON.parse(m[1].replace(/&quot;/g, "\"").replace(/&#0?39;/g, "'")
+      .replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&"));
+    return j && j.props && j.props.anime ? j : null;
+  } catch (_) { return null; }
+}
+
+function auFindEpisode(list, ep) {
+  for (var i = 0; i < (list || []).length; i++) {
+    if (parseFloat(list[i].number || "") === ep) return list[i];
+  }
+  return null;
+}
+
+function auInertiaEmbed(page, ep, wantIta) {
+  return __async(function* () {
+    var props = page.props;
+    var anime = props.anime;
+    var animeUrl = AU_BASE + "/anime/" + anime.id + "-" + anime.slug;
+    var loaded = props.loadedEpisodes || {};
+    var target = auFindEpisode(loaded.episodes, ep);
+    if (!target && Number(loaded.total) > (loaded.episodes || []).length) {
+      var start = Math.floor((ep - 1) / 120) * 120 + 1;
+      try {
+        var data = JSON.parse(yield auRequest(AU_BASE + "/api/anime/" + anime.id + "/episodes?start=" + start, "xhr", animeUrl));
+        target = auFindEpisode(data && data.episodes, ep);
+      } catch (_) {}
+    }
+    // Single episode / movie only: elsewhere the default episode is another one.
+    if (!target && (Number(loaded.total) || (loaded.episodes || []).length) <= 1) target = props.episode;
+    if (!target) return null;
+
+    var video = null;
+    var vids = target.videos || [];
+    for (var i = 0; i < vids.length; i++) {
+      if (vids[i].is_hidden) continue;
+      if ((vids[i].language === "ita") === wantIta) { video = vids[i]; break; }
+    }
+    if (!video) return null;
+    if (props.video && props.video.id === video.id && props.embedUrl) return props.embedUrl;
+
+    var next = auParseInertia(yield auRequest(animeUrl + "/" + video.id, "page", animeUrl));
+    return (next && next.props.embedUrl) || null;
+  });
+}
+
+function resolveEpisodeEmbedUrl(animePath, requestedEpisode, wantIta) {
   return __async(function* () {
     var pageUrl = absUrl(animePath, AU_BASE);
     var pageHtml = yield auRequest(pageUrl, "page", AU_BASE + "/");
+    var inertia = auParseInertia(pageHtml);
+    if (inertia) return yield auInertiaEmbed(inertia, requestedEpisode, wantIta);
 
     var episodesAttr = extractTagAttr(pageHtml, "video-player", "episodes");
     var parsedEpisodes = [];
@@ -494,10 +553,10 @@ function resolveEpisodeEmbedUrl(animePath, requestedEpisode) {
 // ---------------------------------------------------------------- VixCloud Stream Resolver
 
 // Same player served from mirrored hosts; if one is blocked (403/CF) the other usually works.
-var VIX_HOSTS = ["vixcloud.co", "vixsrc.to"];
+var VIX_HOSTS = ["vixcloud.cc", "vixcloud.co", "vixsrc.to"];
 
 function withVixHost(url, host) {
-  return String(url || "").replace(/^(https?:\/\/)(?:www\.)?(?:vixcloud\.co|vixsrc\.to)(?=[\/?#:]|$)/i, "$1" + host);
+  return String(url || "").replace(/^(https?:\/\/)(?:www\.)?(?:vixcloud\.(?:cc|co)|vixsrc\.to)(?=[\/?#:]|$)/i, "$1" + host);
 }
 
 // ".m3u8" belongs to the path, before any existing query (e.g. "/playlist/123?b=1").
@@ -669,7 +728,7 @@ function getStreams(rawId, mediaType, reqSeason, reqEpisode) {
       var audioLine = isIta ? "\uD83D\uDD0A \uD83C\uDDEE\uD83C\uDDF9 Italiano" : "\uD83D\uDD0A \uD83C\uDDEF\uD83C\uDDF5 Giapponese \u00B7 \uD83D\uDCAC Sub ITA";
 
       try {
-        var embedUrl = yield resolveEpisodeEmbedUrl(animePath, Number(targetEp));
+        var embedUrl = yield resolveEpisodeEmbedUrl(animePath, Number(targetEp), isIta);
         if (!embedUrl) continue;
 
         var vixData = yield resolveVixCloudStream(embedUrl);
