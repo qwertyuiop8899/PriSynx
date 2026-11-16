@@ -461,10 +461,12 @@ function auInertiaEmbed(page, ep, wantIta) {
   });
 }
 
+var auPageCache = {};
+
 function resolveEpisodeEmbedUrl(animePath, requestedEpisode, wantIta) {
   return __async(function* () {
     var pageUrl = absUrl(animePath, AU_BASE);
-    var pageHtml = yield auRequest(pageUrl, "page", AU_BASE + "/");
+    var pageHtml = auPageCache[pageUrl] || (auPageCache[pageUrl] = yield auRequest(pageUrl, "page", AU_BASE + "/"));
     var inertia = auParseInertia(pageHtml);
     if (inertia) return yield auInertiaEmbed(inertia, requestedEpisode, wantIta);
 
@@ -721,15 +723,29 @@ function getStreams(rawId, mediaType, reqSeason, reqEpisode) {
     var heading = "\uD83D\uDCC1 " + (animeTitle || "Anime") + (req.isTv ? " Ep " + pad2(targetEp) : "") + (animeYear ? " (" + animeYear + ")" : "");
     var allStreams = [];
 
-    for (var p = 0; p < paths.length; p++) {
-      var animePath = paths[p];
-      var isIta = /(?:^|[-_/])ita(?:[-_/]|$)/i.test(animePath);
+    // New site merges ITA and SUB in one page: try both languages on every path, dedupe by video.
+    var jobs = [];
+    for (var q = 0; q < paths.length; q++) {
+      var pathIta = /(?:^|[-_/])ita(?:[-_/]|$)/i.test(paths[q]);
+      jobs.push({ path: paths[q], ita: pathIta }, { path: paths[q], ita: !pathIta });
+    }
+    var seenEmbeds = {};
+    var gotLang = {};
+
+    for (var p = 0; p < jobs.length; p++) {
+      var animePath = jobs[p].path;
+      var isIta = jobs[p].ita;
+      if (gotLang[isIta]) continue;
       var langTag = isIta ? "\uD83C\uDDEE\uD83C\uDDF9 ITA" : "\uD83C\uDDEF\uD83C\uDDF5 SUB";
       var audioLine = isIta ? "\uD83D\uDD0A \uD83C\uDDEE\uD83C\uDDF9 Italiano" : "\uD83D\uDD0A \uD83C\uDDEF\uD83C\uDDF5 Giapponese \u00B7 \uD83D\uDCAC Sub ITA";
 
       try {
         var embedUrl = yield resolveEpisodeEmbedUrl(animePath, Number(targetEp), isIta);
         if (!embedUrl) continue;
+        var embedKey = (embedUrl.match(/\/embed\/(\d+)/) || [])[1] || embedUrl;
+        if (seenEmbeds[embedKey]) continue;
+        seenEmbeds[embedKey] = true;
+        gotLang[isIta] = true;
 
         var vixData = yield resolveVixCloudStream(embedUrl);
         var playHeaders = vixData.headers;
