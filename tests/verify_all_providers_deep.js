@@ -56,7 +56,7 @@ const PROVIDERS = [
     name: "🎥 Filmez",
     file: "../providers/plugin_filmez.js",
     tests: [
-      { label: "Film (Ice Cream Man)", id: "tt36893729", type: "movie", fallback: { id: "tt14642640", type: "movie" } }
+      { label: "Film (Odissea)", id: "1368337", type: "movie", fallback: { id: "tt15239678", type: "movie" } }
     ]
   },
   {
@@ -64,8 +64,8 @@ const PROVIDERS = [
     name: "📡 OnlineSerieTV",
     file: "../providers/plugin_onlineserietv.js",
     tests: [
-      { label: "Film (Ice Cream Man)", id: "tt36893729", type: "movie", fallback: { id: "tt14642640", type: "movie" } },
-      { label: "Serie (Campus Drivers)", id: "tt39943756", type: "series", s: 1, e: 1, fallback: { id: "tt2261391", type: "series", s: 1, e: 1 } }
+      { label: "Film (Odissea)", id: "1368337", type: "movie", fallback: { id: "tt15239678", type: "movie" } },
+      { label: "Serie (Shōgun)", id: "tt2788316", type: "series", s: 1, e: 1, fallback: { id: "tt1196946", type: "series", s: 1, e: 1 } }
     ]
   },
   {
