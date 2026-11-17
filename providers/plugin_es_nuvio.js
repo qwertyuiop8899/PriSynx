@@ -2016,7 +2016,7 @@ var _cachedMaxstreamPrefix = null;
 var _cachedPrefixTime = 0;
 
 // Prefix order: last live one seen, shared service, then known prefixes (newest first).
-var MAXSTREAM_PREFIXES = ['emiyiuc5', 'emiatgfr', 'emisghyy'];
+var MAXSTREAM_PREFIXES = ['emi7m2j4', 'emiyiuc5', 'emiatgfr', 'emisghyy'];
 
 function _rememberPrefix(p) {
   if (p && /^[A-Za-z0-9]{4,16}$/.test(p) && p !== 'uprots' && p !== 'uprot') {
@@ -2246,18 +2246,29 @@ function processUprotUrl(link, ua) {
   return cachedPlayer(key)
     .then(function (player) {
       if (!player) return null;
-      return normalizeMaxstreamPlayer(player, activeUa)
-        .then(function (norm) {
-          return maxstreamM3u8(norm, activeUa).then(function (m3u8) {
-            if (m3u8 && norm !== player) storePlayer(key, norm);
-            return m3u8;
+      // Cached pages keep the prefix of when they were stored: on a dead one, retry the VID with the live prefix.
+      var m = String(player).match(/^https?:\/\/(?:www\.)?maxstream\.video\/([A-Za-z0-9]+)\/([A-Za-z0-9]+)\/?$/i);
+      return _maxstreamM3u8Raw(player, activeUa)
+        .then(function (m3u8) {
+          if (m3u8 || !m) return m3u8 ? normalizeMaxstreamPlayer(player).then(function () { return m3u8; }) : null;
+          return getMaxstreamPrefixes().then(function (list) {
+            var live = list[0];
+            if (!live || live === m[1]) return null;
+            var fresh = 'https://maxstream.video/' + live + '/' + m[2];
+            return maxstreamM3u8(fresh, activeUa).then(function (m3u8b) {
+              if (m3u8b) { storePlayer(key, fresh); return m3u8b; }
+              // Same VID behind the captcha: a deleted file must not burn a vision call.
+              return _safeFetch(fresh, { headers: { 'User-Agent': activeUa, 'Referer': 'https://maxstream.video/' } })
+                .then(function (r) { return r.text(); })
+                .then(function (t) { return /not longer available|has been deleted/i.test(t || '') ? 'DEAD' : null; });
+            });
           });
         })
         .catch(function () { return null; });
     })
     .then(function (m3u8) { return m3u8 || solve(); })
     .then(function (m3u8) {
-      if (!m3u8) return null;
+      if (!m3u8 || m3u8 === 'DEAD') return null;
       var headers = { 'User-Agent': activeUa, 'Referer': 'https://maxstream.video/' };
       return hlsQuality(m3u8, headers).then(function (q) {
         return { name: 'MaxStream', url: m3u8, quality: q || '720p', behaviorHints: { notWebReady: true }, headers: headers };
