@@ -287,6 +287,7 @@ function findStreams(tmdbId, mediaType, season, episode) {
           }
         };
         if (res.hls) stream.type = 'hls';
+        if (!res.ita) stream.name = stream.name.replace(FLAG_IT, FLAG_JP);
         streams.push(stream);
       }
       streams.sort(function (a, b) { return a.name < b.name ? -1 : a.name > b.name ? 1 : 0; });

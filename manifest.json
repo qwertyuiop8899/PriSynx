@@ -368,7 +368,7 @@
       "id": "prisynx-animeworld",
       "name": "🌸 AnimeWorld",
       "description": "Anime ITA e SUB-ITA da AnimeWorld (MP4 diretti)",
-      "version": "1.1.0",
+      "version": "1.1.1",
       "author": "PriSynx",
       "resources": [
         "stream"
@@ -400,7 +400,7 @@
       "id": "prisynx-animesaturn",
       "name": "🦊 AnimeSaturn",
       "description": "Anime ITA e SUB-ITA da AnimeSaturn (StreamPeaker HLS/MP4)",
-      "version": "1.1.0",
+      "version": "1.1.1",
       "author": "PriSynx",
       "resources": [
         "stream"
