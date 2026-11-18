@@ -449,9 +449,10 @@ function auInertiaEmbed(page, ep, wantIta) {
 
     var video = null;
     var vids = target.videos || [];
+    // Hidden videos (e.g. JoJo ITA eps 3-26) still have a working player: use them as a fallback.
     for (var i = 0; i < vids.length; i++) {
-      if (vids[i].is_hidden) continue;
-      if ((vids[i].language === "ita") === wantIta) { video = vids[i]; break; }
+      if ((vids[i].language === "ita") !== wantIta) continue;
+      if (!video || (video.is_hidden && !vids[i].is_hidden)) video = vids[i];
     }
     if (!video) return null;
     if (props.video && props.video.id === video.id && props.embedUrl) return props.embedUrl;
