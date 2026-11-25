@@ -233,7 +233,7 @@
       "id": "prisynx-altadefinizione",
       "name": "🏰 Altadefinizione",
       "description": "Film e Serie TV da Altadefinizione (CDN diretta MP4 720p/1080p, audio italiano)",
-      "version": "1.1.0",
+      "version": "1.1.1",
       "author": "PriSynx",
       "resources": [
         "stream"

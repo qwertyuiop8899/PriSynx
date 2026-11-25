@@ -1,6 +1,6 @@
 // Altadefinizione - provider locale per NuvioTV / Nuvio Mobile.
 // Usa /api/player-sources del sito (MP4 720p su piu' edge CDN, link legati all'IP del dispositivo).
-// Cookie provati in ordine: SCRAPER_SETTINGS.altadefinizioneCookie, OWN_COOKIE, ADS_COOKIE di realbestia domains.json.
+// Cookie provati in ordine: SCRAPER_SETTINGS.altadefinizioneCookie, ADS_COOKIE di realbestia domains.json, OWN_COOKIE.
 
 var DOMAINS_URL = 'https://raw.githubusercontent.com/realbestia1/domains/refs/heads/main/domains.json';
 var DEFAULT_BASE = 'https://altastreaming.duckdns.org';
@@ -81,7 +81,7 @@ function getConfig() {
     try { custom = String((globalThis.SCRAPER_SETTINGS || {}).altadefinizioneCookie || '').trim(); } catch (e) { }
     return {
       base: /^https?:\/\/[^/]+$/i.test(base) ? base : DEFAULT_BASE,
-      cookies: [custom, OWN_COOKIE, String(cfg.ADS_COOKIE || '').trim()].filter(function (c, i, a) { return c && a.indexOf(c) === i; })
+      cookies: [custom, String(cfg.ADS_COOKIE || '').trim(), OWN_COOKIE].filter(function (c, i, a) { return c && a.indexOf(c) === i; })
     };
   });
 }
