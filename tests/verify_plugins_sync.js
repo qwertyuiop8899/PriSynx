@@ -162,6 +162,7 @@ async function runTests() {
 
   const originalFetch = global.fetch;
   const recordedCalls = [];
+  let mockCandidatesItems = [];
 
   try {
     global.fetch = async (url, options = {}) => {
@@ -171,6 +172,9 @@ async function runTests() {
       // TMDB mock (Lupin + non-Lupin Breaking Bad)
       if (u.startsWith("https://api.themoviedb.org/3/find/tt2531336")) {
         return makeMockResponse({ tv_results: [{ id: 96677, name: "Lupin", first_air_date: "2021-01-08" }] });
+      }
+      if (u.startsWith("https://api.themoviedb.org/3/find/tt0903747")) {
+        return makeMockResponse({ tv_results: [{ id: 1396, name: "Breaking Bad", first_air_date: "2008-01-20" }] });
       }
       if (u.startsWith("https://api.themoviedb.org/3/tv/96677")) {
         return makeMockResponse({
@@ -237,7 +241,7 @@ async function runTests() {
         return makeMockResponse({ found: false });
       }
       if (u.startsWith("https://toastflix.stremio-italia.eu/dual/offset/candidates")) {
-        return makeMockResponse({ items: [] });
+        return makeMockResponse({ items: mockCandidatesItems });
       }
       if (u.startsWith("https://autosync.stremio-italia.eu/plugin/jobs/status")) {
         return makeMockResponse({ items: [] });
@@ -351,6 +355,21 @@ async function runTests() {
       "Serie non-Lupin S01E06 non deve essere rimappata su VixSrc"
     );
     console.log("-> PASS: Mappatura episodi Lupin verificata su vixsrc, movyita e dualsync.");
+
+    // [Test 5] Regressione: Cinejoy 1200s NON deve essere bloccato da misura Movy 1200s su ToastFlix
+    console.log("\n[Test 5] DualSync: Scoping provider su unmeasuredEncodes e unmatched...");
+    mockCandidatesItems = [
+      { provider: "movy", resolution: 1080, status: "ok", offset: -0.034, rate: 1.0, has_cuts: false, video_duration: 1200.0 }
+    ];
+    recordedCalls.length = 0;
+    const cinejoyStreams = await dualsync.getStreams("tt0903747", "tv", 1, 6);
+    assert(cinejoyStreams.length > 0, "DualSync deve restituire lo stream Cinejoy");
+    const postJob = recordedCalls.find(c => c.url === "https://autosync.stremio-italia.eu/plugin/jobs" && c.method === "POST");
+    assert(postJob, "Cinejoy non misurato deve inviare POST /plugin/jobs anche se Movy ha la stessa durata!");
+    const postBody = JSON.parse(postJob.body);
+    assert.strictEqual(postBody.items[0].provider, "cinejoy", "Il job accodato deve avere provider cinejoy");
+    assert(recordedCalls.some(c => c.url === "https://vixsrc.to/audio/ita.m3u8"), "unmatched deve scaricare la durata ITA per encode Cinejoy non misurato");
+    console.log("-> PASS: Cinejoy accodato correttamente ad AutoSync nonostante misura Movy di pari durata.");
   } finally {
     global.fetch = originalFetch;
   }

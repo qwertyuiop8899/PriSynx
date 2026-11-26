@@ -716,18 +716,24 @@ function estimateSync(videoLength, itaLength) {
   return { level: "red", reason: "durata diversa di " + diffText, tag: "durata " + diffText };
 }
 
-function syncFor(enc, measured, itaLength, autoJobs) {
-  var jobStatus = autoJobs && autoJobs.status;
-  var jobStage = autoJobs && autoJobs.stage;
-  var queueAhead = autoJobs && autoJobs.queueAhead;
+function findMeasuredHit(measured, enc) {
   var siteKey = (enc.site || "").toLowerCase();
-
   var hit = null;
   (measured || []).forEach(function (m) {
     if (m.provider && (m.provider || "").toLowerCase() !== siteKey) return;
     var d = Math.abs(Number(m.video_duration) - enc.length);
     if (d <= DB_LENGTH_TOLERANCE_S && (!hit || d < hit.d)) hit = { m: m, d: d };
   });
+  return hit;
+}
+
+function syncFor(enc, measured, itaLength, autoJobs) {
+  var jobStatus = autoJobs && autoJobs.status;
+  var jobStage = autoJobs && autoJobs.stage;
+  var queueAhead = autoJobs && autoJobs.queueAhead;
+  var siteKey = (enc.site || "").toLowerCase();
+
+  var hit = findMeasuredHit(measured, enc);
 
   // Se questo encode ha una misurazione valida con esito "ok", vince sempre sugli errori storici di altri server
   if (hit && hit.m.status === "ok") {
@@ -966,14 +972,10 @@ function getStreams(tmdbId, mediaType, season, episode) {
 
     // Trigger background measurement on AutoSync if any encode is unmeasured or has unverified incompatible verdict
     var unmeasuredEncodes = encodes.filter(function (enc) {
-      var hit = null;
-      (measured || []).forEach(function (m) {
-        var d = Math.abs(Number(m.video_duration) - enc.length);
-        if (d <= DB_LENGTH_TOLERANCE_S && (!hit || d < hit.d)) hit = m;
-      });
+      var hit = findMeasuredHit(measured, enc);
       if (!hit) return true;
-      if (hit.status === "ok") return false;
-      if (hit.status === "incompatible" && autoJobStatus === "incompatible") return false;
+      if (hit.m.status === "ok") return false;
+      if (hit.m.status === "incompatible" && autoJobStatus === "incompatible") return false;
       return true;
     });
     if (ita && unmeasuredEncodes.length) {
@@ -1040,7 +1042,7 @@ function getStreams(tmdbId, mediaType, season, episode) {
     // The ITA length is only needed for encodes ToastFlix never measured.
     var itaLength = 0;
     var unmatched = encodes.some(function (enc) {
-      return !(measured || []).some(function (m) { return Math.abs(Number(m.video_duration) - enc.length) <= DB_LENGTH_TOLERANCE_S; });
+      return !findMeasuredHit(measured, enc);
     });
     if (ita && unmatched) {
       itaLength = yield getText(ita.audio.uri, ita.headers, 12000).then(playlistLength).catch(function (e) {
