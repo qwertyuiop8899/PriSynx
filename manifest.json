@@ -1,6 +1,6 @@
 {
   "name": "PriSynx",
-  "version": "1.5.12",
+  "version": "1.5.13",
   "description": "Suite di streaming per Nuvio con sorgenti italiane/internazionali, sync audio e multi-qualità",
   "author": "PriSynx",
   "scrapers": [
@@ -175,7 +175,7 @@
       "id": "prisynx-vixsrc",
       "name": "💎 VixSrc",
       "description": "Film e Serie TV da VixSrc in HD/FHD con audio e sottotitoli italiani",
-      "version": "1.2.2",
+      "version": "1.2.3",
       "author": "PriSynx",
       "resources": [
         "stream"
