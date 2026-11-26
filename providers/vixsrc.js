@@ -386,6 +386,20 @@ function buildInlineVariantUri(variant, commonTags, base) {
 
 // ---------------------------------------------------------------- Entry point
 
+function mapVixSrcEpisode(tmdbId, imdbId, season, episode) {
+  var s = Number(season);
+  var e = Number(episode);
+  var tmdb = String(tmdbId || "").replace(/^tmdb:/i, "");
+  var imdb = String(imdbId || "");
+  if (tmdb === "96677" || imdb === "tt2531336") {
+    if (s === 1 && e >= 1 && e <= 5) return { season: 1, episode: e };
+    if (s === 1 && e >= 6 && e <= 10) return { season: 2, episode: e - 5 };
+    if (s === 2 && e >= 1 && e <= 7) return { season: 3, episode: e };
+    if (s === 3 && e >= 1 && e <= 8) return { season: 4, episode: e };
+  }
+  return { season: s, episode: e };
+}
+
 function getStreams(tmdbId, mediaType, season, episode) {
   var isTv = mediaType === "tv" || mediaType === "series";
   console.log("[VixSrc] getStreams id=" + tmdbId + " type=" + mediaType + " s=" + season + " e=" + episode);
@@ -415,10 +429,11 @@ function getStreams(tmdbId, mediaType, season, episode) {
     var base = VIX_DEFAULT_BASE;
     var payload = null;
     var lastApiPath = "";
+    var vixTarget = isTv ? mapVixSrcEpisode(meta.tmdbId || (isNum ? rawClean : ""), meta.imdbId || imdbMatch, season, episode) : { season: season, episode: episode };
 
     for (var cIdx = 0; cIdx < candidateIds.length; cIdx++) {
       var cand = candidateIds[cIdx];
-      var apiPath = isTv ? "/api/tv/" + cand + "/" + Number(season) + "/" + Number(episode) : "/api/movie/" + cand;
+      var apiPath = isTv ? "/api/tv/" + cand + "/" + vixTarget.season + "/" + vixTarget.episode : "/api/movie/" + cand;
       lastApiPath = apiPath;
       try {
         payload = yield getVixPayload(base, apiPath);
@@ -672,6 +687,6 @@ function getStreams(tmdbId, mediaType, season, episode) {
   });
 }
 
-if (typeof module !== "undefined" && module.exports) module.exports = { getStreams: getStreams };
+if (typeof module !== "undefined" && module.exports) module.exports = { getStreams: getStreams, mapVixSrcEpisode: mapVixSrcEpisode };
 if (typeof globalThis !== "undefined") globalThis.getStreams = getStreams;
 if (typeof global !== "undefined") global.getStreams = getStreams;

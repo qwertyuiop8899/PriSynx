@@ -495,9 +495,23 @@ function attr(line, key) {
   return m[2] !== undefined ? m[2] : m[1];
 }
 
-function getItalianTracks(tmdbId, isTv, season, episode) {
+function mapVixSrcEpisode(tmdbId, imdbId, season, episode) {
+  var s = Number(season);
+  var e = Number(episode);
+  var isLupin = String(tmdbId || "").replace(/^tmdb:/i, "") === "96677" || String(imdbId || "") === "tt2531336";
+  if (isLupin) {
+    if (s === 1 && e >= 1 && e <= 5) return { season: 1, episode: e };
+    if (s === 1 && e >= 6 && e <= 10) return { season: 2, episode: e - 5 };
+    if (s === 2 && e >= 1 && e <= 7) return { season: 3, episode: e };
+    if (s === 3 && e >= 1 && e <= 8) return { season: 4, episode: e };
+  }
+  return { season: s, episode: e };
+}
+
+function getItalianTracks(tmdbId, isTv, season, episode, imdbId) {
   return __async(function* () {
-    var apiPath = isTv ? "/api/tv/" + tmdbId + "/" + season + "/" + episode : "/api/movie/" + tmdbId;
+    var mapped = isTv ? mapVixSrcEpisode(tmdbId, imdbId, season, episode) : null;
+    var apiPath = isTv ? "/api/tv/" + tmdbId + "/" + mapped.season + "/" + mapped.episode : "/api/movie/" + tmdbId;
     var base = VIX_DEFAULT_BASE, payload;
     try {
       payload = yield getVixPayload(base, apiPath);
@@ -788,7 +802,7 @@ function getStreams(tmdbId, mediaType, season, episode) {
         console.warn("[MovyITA] Movy failed: " + e.message);
         return { sources: [], subtitles: [] };
       }),
-      getItalianTracks(id, isTv, season, episode).catch(function (e) {
+      getItalianTracks(id, isTv, season, episode, meta.imdbId).catch(function (e) {
         console.warn("[MovyITA] SC/vixsrc failed: " + e.message);
         return null;
       }),
